@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+
+{% block title %}Conflicts{% endblock %}
+
+{% block content %}
+<div class="row mb-4">
+    <div class="col">
+        <h2><i class="bi bi-exclamation-triangle text-warning me-2"></i>Conflicts</h2>
+        <p class="text-muted">
+            These tasks have different values in JSON (git) and SQLite (local).
+            Resolve each conflict by choosing which version to keep.
+        </p>
+    </div>
+</div>
+
+{% if conflicts %}
+<div class="list-group">
+    {% for conflict in conflicts %}
+    <a href="/conflicts/{{ conflict.feature_name }}/" class="list-group-item list-group-item-action">
+        <div class="d-flex w-100 justify-content-between align-items-center">
+            <div>
+                <h5 class="mb-1">{{ conflict.feature_name }}</h5>
+                <div class="d-flex gap-3">
+                    <span>
+                        <i class="bi bi-file-earmark-code me-1"></i>
+                        JSON: <span class="badge bg-secondary">{{ conflict.json_data.status }}</span>
+                    </span>
+                    <span>
+                        <i class="bi bi-database me-1"></i>
+                        Local: <span class="badge bg-secondary">{{ conflict.sqlite_status }}</span>
+                    </span>
+                </div>
+            </div>
+            <i class="bi bi-chevron-right"></i>
+        </div>
+        <small class="text-muted">
+            JSON updated: {{ conflict.json_updated_at|date:"M j, H:i" }} |
+            Local updated: {{ conflict.sqlite_updated_at|date:"M j, H:i" }}
+        </small>
+    </a>
+    {% endfor %}
+</div>
+{% else %}
+<div class="alert alert-success">
+    <i class="bi bi-check-circle me-2"></i>
+    No conflicts! All tasks are in sync.
+</div>
+<a href="/worktrees/" class="btn btn-primary">
+    <i class="bi bi-arrow-left me-1"></i>Back to Worktrees
+</a>
+{% endif %}
+{% endblock %}

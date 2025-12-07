@@ -1,0 +1,296 @@
+{% extends "base.html" %}
+
+{% block title %}Worktrees{% endblock %}
+
+{% block content %}
+<div class="row mb-4">
+    <div class="col">
+        <h2><i class="bi bi-folder me-2"></i>Worktrees</h2>
+        <p class="text-muted">
+            Tasks from all machines. Local worktrees shown with paths and ports.
+        </p>
+    </div>
+    <div class="col-auto">
+        <a href="/worktrees/create/" class="btn btn-success">
+            <i class="bi bi-plus-lg me-1"></i>New Worktree
+        </a>
+    </div>
+</div>
+
+{% if sync_status.conflicts %}
+<div class="alert alert-warning">
+    <i class="bi bi-exclamation-triangle me-2"></i>
+    <strong>{{ sync_status.conflicts|length }} conflict{{ sync_status.conflicts|length|pluralize }}</strong>
+    between local and remote task data.
+    <a href="/conflicts/" class="alert-link">Resolve now</a>
+</div>
+{% endif %}
+
+<div class="row row-cols-1 row-cols-md-2 row-cols-lg-3 g-4">
+    {% for wt in worktrees %}
+    <div class="col">
+        <div class="card h-100 {% if not wt.has_local_worktree %}border-secondary{% elif wt.status == 'in_progress' %}border-primary{% elif wt.status == 'done' %}border-success{% endif %}">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <span class="fw-bold">{{ wt.feature_name }}</span>
+                {% if wt.status %}
+                <span class="badge {% if wt.status == 'todo' %}bg-secondary{% elif wt.status == 'in_progress' %}bg-primary{% else %}bg-success{% endif %}">
+                    {{ wt.status_display }}
+                </span>
+                {% else %}
+                <span class="badge bg-warning text-dark">No Task</span>
+                {% endif %}
+            </div>
+            <div class="card-body">
+                <h6 class="card-title">{{ wt.title }}</h6>
+
+                {% if wt.has_local_worktree %}
+                <div class="mb-2">
+                    <small class="text-muted">
+                        <i class="bi bi-folder2-open me-1"></i>
+                        <code>{{ wt.path }}</code>
+                    </small>
+                </div>
+                <div class="mb-2">
+                    <span class="badge bg-info text-dark me-1">
+                        <i class="bi bi-globe me-1"></i>Port {{ wt.web_port }}
+                    </span>
+                    <span class="badge bg-info text-dark">
+                        <i class="bi bi-database me-1"></i>Port {{ wt.db_port }}
+                    </span>
+                </div>
+                {% else %}
+                <div class="mb-2">
+                    <span class="badge bg-secondary">
+                        <i class="bi bi-cloud me-1"></i>Remote Only
+                    </span>
+                    <small class="text-muted ms-2">No local worktree</small>
+                </div>
+                {% endif %}
+
+                {% if wt.updated_at %}
+                <small class="text-muted d-block">
+                    <i class="bi bi-clock me-1"></i>
+                    Updated: {{ wt.updated_at|date:"M j, H:i" }}
+                </small>
+                {% endif %}
+            </div>
+            <div class="card-footer bg-transparent">
+                {% if wt.has_local_worktree %}
+                <a href="http://localhost:{{ wt.web_port }}/" target="_blank" class="btn btn-sm btn-outline-primary">
+                    <i class="bi bi-box-arrow-up-right me-1"></i>Open
+                </a>
+                <a href="/worktrees/{{ wt.feature_name }}/clone-db/" class="btn btn-sm btn-outline-secondary">
+                    <i class="bi bi-database-add me-1"></i>Clone DB
+                </a>
+                <button type="button" class="btn btn-sm btn-outline-danger"
+                        onclick="closeWorktree('{{ wt.feature_name }}')"
+                        title="Close worktree">
+                    <i class="bi bi-x-lg"></i>
+                </button>
+                {% else %}
+                <form action="/worktrees/create/" method="post" class="d-inline">
+                    <input type="hidden" name="csrfmiddlewaretoken" value="{{ csrf_token }}">
+                    <input type="hidden" name="feature_name" value="{{ wt.feature_name }}">
+                    <button type="submit" class="btn btn-sm btn-success">
+                        <i class="bi bi-download me-1"></i>Create Local
+                    </button>
+                </form>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+    {% empty %}
+    <div class="col-12">
+        <div class="alert alert-info">
+            <i class="bi bi-info-circle me-2"></i>
+            No worktrees yet.
+            <a href="/worktrees/create/" class="alert-link">Create your first worktree</a>
+        </div>
+    </div>
+    {% endfor %}
+</div>
+
+<div class="mt-4">
+    <h5>Sync Status</h5>
+    <div class="row">
+        <div class="col-md-4">
+            <div class="card">
+                <div class="card-body text-center">
+                    <h3>{{ sync_status.json_task_count }}</h3>
+                    <small class="text-muted">Tasks in JSON (git)</small>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-4">
+            <div class="card">
+                <div class="card-body text-center">
+                    <h3>{{ sync_status.sqlite_task_count }}</h3>
+                    <small class="text-muted">Tasks in SQLite (local)</small>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-4">
+            <div class="card">
+                <div class="card-body text-center">
+                    <h3>{{ sync_status.synced|length }}</h3>
+                    <small class="text-muted">In Sync</small>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Close Worktree Modal -->
+<div class="modal fade" id="closeWorktreeModal" tabindex="-1" aria-labelledby="closeWorktreeModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="closeWorktreeModalLabel">Close Worktree</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <div id="statusLoading" class="text-center py-3">
+                    <span class="spinner-border spinner-border-sm me-2"></span>
+                    Checking worktree status...
+                </div>
+                <div id="statusContent" style="display: none;">
+                    <p>Close worktree <strong id="closeWorktreeName"></strong>?</p>
+
+                    <div id="warningsSection" style="display: none;">
+                        <div class="alert alert-danger">
+                            <i class="bi bi-exclamation-octagon me-2"></i>
+                            <strong>Warning!</strong> This worktree has:
+                            <ul class="mb-0 mt-2" id="warningsList"></ul>
+                        </div>
+                    </div>
+
+                    <div id="safeSection" style="display: none;">
+                        <div class="alert alert-success">
+                            <i class="bi bi-check-circle me-2"></i>
+                            Branch is merged and all changes are committed and pushed.
+                        </div>
+                    </div>
+
+                    <p class="text-muted small">This will:</p>
+                    <ul class="text-muted small">
+                        <li>Stop Docker containers</li>
+                        <li>Remove the worktree directory</li>
+                        <li>Remove from registry</li>
+                        <li>Mark the task as done</li>
+                    </ul>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-danger" id="confirmCloseBtn" onclick="confirmClose(false)" style="display: none;">
+                    <i class="bi bi-x-lg me-1"></i>Close Worktree
+                </button>
+                <button type="button" class="btn btn-warning" id="forceCloseBtn" onclick="confirmClose(true)" style="display: none;">
+                    <i class="bi bi-exclamation-triangle me-1"></i>Force Close
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+let worktreeToClose = null;
+let closeModal = null;
+
+function closeWorktree(featureName) {
+    worktreeToClose = featureName;
+    document.getElementById('closeWorktreeName').textContent = featureName;
+
+    // Reset modal state
+    document.getElementById('statusLoading').style.display = 'block';
+    document.getElementById('statusContent').style.display = 'none';
+    document.getElementById('confirmCloseBtn').style.display = 'none';
+    document.getElementById('forceCloseBtn').style.display = 'none';
+    document.getElementById('warningsSection').style.display = 'none';
+    document.getElementById('safeSection').style.display = 'none';
+
+    closeModal = new bootstrap.Modal(document.getElementById('closeWorktreeModal'));
+    closeModal.show();
+
+    // Fetch status
+    fetch('/worktrees/' + featureName + '/status/')
+        .then(response => response.json())
+        .then(data => {
+            document.getElementById('statusLoading').style.display = 'none';
+            document.getElementById('statusContent').style.display = 'block';
+
+            if (data.warnings && data.warnings.length > 0) {
+                // Show warnings
+                document.getElementById('warningsSection').style.display = 'block';
+                const warningsList = document.getElementById('warningsList');
+                warningsList.innerHTML = '';
+
+                const warningLabels = {
+                    'uncommitted': 'Uncommitted changes',
+                    'unpushed': 'Unpushed commits',
+                    'unmerged': 'Branch not merged to develop'
+                };
+
+                data.warnings.forEach(w => {
+                    const li = document.createElement('li');
+                    li.textContent = warningLabels[w] || w;
+                    warningsList.appendChild(li);
+                });
+
+                // Show force close button only
+                document.getElementById('forceCloseBtn').style.display = 'inline-block';
+            } else {
+                // Safe to close
+                document.getElementById('safeSection').style.display = 'block';
+                document.getElementById('confirmCloseBtn').style.display = 'inline-block';
+            }
+        })
+        .catch(error => {
+            document.getElementById('statusLoading').style.display = 'none';
+            document.getElementById('statusContent').style.display = 'block';
+            // On error, show force close option
+            document.getElementById('forceCloseBtn').style.display = 'inline-block';
+        });
+}
+
+function confirmClose(force) {
+    if (!worktreeToClose) return;
+
+    const btn = force ? document.getElementById('forceCloseBtn') : document.getElementById('confirmCloseBtn');
+    const originalHtml = btn.innerHTML;
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Closing...';
+
+    fetch('/worktrees/' + worktreeToClose + '/close/', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-CSRFToken': '{{ csrf_token }}',
+        },
+        body: JSON.stringify({ force: force }),
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            window.location.reload();
+        } else if (data.requires_force) {
+            // Show force option if not already showing
+            document.getElementById('forceCloseBtn').style.display = 'inline-block';
+            btn.disabled = false;
+            btn.innerHTML = originalHtml;
+        } else {
+            alert('Error: ' + (data.error || data.message || 'Unknown error'));
+            btn.disabled = false;
+            btn.innerHTML = originalHtml;
+        }
+    })
+    .catch(error => {
+        alert('Error: ' + error);
+        btn.disabled = false;
+        btn.innerHTML = originalHtml;
+    });
+}
+</script>
+{% endblock %}

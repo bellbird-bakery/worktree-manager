@@ -1,0 +1,99 @@
+{% extends "base.html" %}
+
+{% block title %}Worktree Tasks - Kanban{% endblock %}
+
+{% block content %}
+<div class="kanban-board"
+     id="kanban-board"
+     data-move-url="/tasks/{id}/move/"
+     data-csrf-token="{{ csrf_token }}">
+    <div class="kanban-columns">
+        <!-- To Do Column -->
+        <div class="kanban-column" data-status="todo" id="kanban-column-todo">
+            <div class="kanban-column-header">
+                <h5 class="kanban-column-title">
+                    <i class="bi bi-circle text-secondary me-2"></i>
+                    To Do
+                </h5>
+                <span class="kanban-count status-todo">{{ todo_tasks|length }}</span>
+            </div>
+            <div class="kanban-column-content" data-status="todo">
+                {% for task in todo_tasks %}
+                    <div class="card mb-2 kanban-card"
+                         data-item-id="{{ task.pk }}"
+                         data-status="{{ task.status }}"
+                         id="kanban-card-{{ task.pk }}"
+                         draggable="true">
+                        <div class="card-body p-2">
+                            {% include "partials/card.html" %}
+                        </div>
+                    </div>
+                {% empty %}
+                    <div class="kanban-empty">
+                        <i class="bi bi-inbox text-muted"></i>
+                        <span>No tasks</span>
+                    </div>
+                {% endfor %}
+            </div>
+        </div>
+
+        <!-- In Progress Column -->
+        <div class="kanban-column" data-status="in_progress" id="kanban-column-in_progress">
+            <div class="kanban-column-header">
+                <h5 class="kanban-column-title">
+                    <i class="bi bi-play-circle text-primary me-2"></i>
+                    In Progress
+                </h5>
+                <span class="kanban-count status-in_progress">{{ in_progress_tasks|length }}</span>
+            </div>
+            <div class="kanban-column-content" data-status="in_progress">
+                {% for task in in_progress_tasks %}
+                    <div class="card mb-2 kanban-card"
+                         data-item-id="{{ task.pk }}"
+                         data-status="{{ task.status }}"
+                         id="kanban-card-{{ task.pk }}"
+                         draggable="true">
+                        <div class="card-body p-2">
+                            {% include "partials/card.html" %}
+                        </div>
+                    </div>
+                {% empty %}
+                    <div class="kanban-empty">
+                        <i class="bi bi-inbox text-muted"></i>
+                        <span>No tasks</span>
+                    </div>
+                {% endfor %}
+            </div>
+        </div>
+
+        <!-- Done Column -->
+        <div class="kanban-column" data-status="done" id="kanban-column-done">
+            <div class="kanban-column-header">
+                <h5 class="kanban-column-title">
+                    <i class="bi bi-check-circle text-success me-2"></i>
+                    Done
+                </h5>
+                <span class="kanban-count status-done">{{ done_tasks|length }}</span>
+            </div>
+            <div class="kanban-column-content" data-status="done">
+                {% for task in done_tasks %}
+                    <div class="card mb-2 kanban-card"
+                         data-item-id="{{ task.pk }}"
+                         data-status="{{ task.status }}"
+                         id="kanban-card-{{ task.pk }}"
+                         draggable="true">
+                        <div class="card-body p-2">
+                            {% include "partials/card.html" %}
+                        </div>
+                    </div>
+                {% empty %}
+                    <div class="kanban-empty">
+                        <i class="bi bi-inbox text-muted"></i>
+                        <span>No tasks</span>
+                    </div>
+                {% endfor %}
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

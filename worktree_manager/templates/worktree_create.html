@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+
+{% block title %}Create Worktree{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-header">
+                <h5 class="mb-0">
+                    <i class="bi bi-plus-circle me-2"></i>Create New Worktree
+                </h5>
+            </div>
+            <div class="card-body">
+                {% if error %}
+                <div class="alert alert-danger">
+                    <i class="bi bi-exclamation-triangle me-2"></i>
+                    {{ error }}
+                </div>
+                {% endif %}
+
+                <form method="post" action="/worktrees/create/">
+                    <input type="hidden" name="csrfmiddlewaretoken" value="{{ csrf_token }}">
+
+                    <div class="mb-3">
+                        <label for="feature_name" class="form-label">Feature Name</label>
+                        <input type="text"
+                               class="form-control {% if error %}is-invalid{% endif %}"
+                               id="feature_name"
+                               name="feature_name"
+                               value="{{ feature_name|default('') }}"
+                               placeholder="my-feature"
+                               required
+                               pattern="[a-zA-Z0-9_-]+"
+                               title="Only letters, numbers, hyphens, and underscores">
+                        <div class="form-text">
+                            Use lowercase letters, numbers, and hyphens (e.g., <code>add-user-auth</code>)
+                        </div>
+                    </div>
+
+                    <div class="mb-3">
+                        <h6>This will:</h6>
+                        <ul class="list-unstyled ms-3">
+                            <li><i class="bi bi-check text-success me-2"></i>Create git branch <code>feature/&lt;name&gt;</code></li>
+                            <li><i class="bi bi-check text-success me-2"></i>Create git worktree directory</li>
+                            <li><i class="bi bi-check text-success me-2"></i>Allocate unique web and database ports</li>
+                            <li><i class="bi bi-check text-success me-2"></i>Create <code>.env</code> configuration</li>
+                            <li><i class="bi bi-check text-success me-2"></i>Add to worktree registry</li>
+                            <li><i class="bi bi-check text-success me-2"></i>Create task in Kanban board</li>
+                        </ul>
+                    </div>
+
+                    <div class="d-flex justify-content-between">
+                        <a href="/worktrees/" class="btn btn-outline-secondary">
+                            <i class="bi bi-arrow-left me-1"></i>Cancel
+                        </a>
+                        <button type="submit" class="btn btn-success">
+                            <i class="bi bi-plus-lg me-1"></i>Create Worktree
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
