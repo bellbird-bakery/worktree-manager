@@ -144,6 +144,14 @@ def create_worktree_cmd(feature_name: str) -> int:
             else:
                 content += f'DB_PORT={ports.db}\n'
 
+            # Add UID/GID for non-root Docker containers
+            uid = os.getuid()
+            gid = os.getgid()
+            if 'UID=' not in content:
+                content += f'UID={uid}\n'
+            if 'GID=' not in content:
+                content += f'GID={gid}\n'
+
             with open(env_file, 'w') as f:
                 f.write(content)
 
@@ -993,6 +1001,84 @@ def sync_cmd(pull_only: bool = False, push_only: bool = False, auto_commit: bool
 
     console.print()
     console.print(Panel.fit('[bold green]Sync Complete![/bold green]', border_style='green'))
+    console.print()
+
+    return 0
+
+
+def cleanup_tasks_cmd(dry_run: bool = False, auto_commit: bool = False) -> int:
+    """
+    Remove orphaned tasks from JSON (tasks with no local worktree).
+
+    Args:
+        dry_run: If True, show what would be removed without deleting.
+        auto_commit: Automatically commit changes to git.
+
+    Returns:
+        Exit code (0 for success).
+    """
+    console.print()
+    console.print(Panel.fit('[bold]Cleanup Orphaned Tasks[/bold]', border_style='yellow'))
+    console.print()
+
+    from .sync import cleanup_orphaned_tasks, auto_commit_tasks
+
+    # First, do a dry run to see what would be removed
+    result = cleanup_orphaned_tasks(dry_run=True)
+
+    if result['errors']:
+        for error in result['errors']:
+            console.print(f'[red]Error: {error}[/red]')
+
+    if not result['removed']:
+        console.print('[green]No orphaned tasks found![/green]')
+        console.print()
+        console.print(f'Tasks with active worktrees: [cyan]{len(result["kept"])}[/cyan]')
+        return 0
+
+    console.print(f'Found [yellow]{len(result["removed"])}[/yellow] orphaned tasks:')
+    console.print()
+    for feature in result['removed']:
+        console.print(f'  - [yellow]{feature}[/yellow]')
+    console.print()
+    console.print(f'Tasks with active worktrees: [green]{len(result["kept"])}[/green]')
+    console.print()
+
+    if dry_run:
+        console.print('[dim]Dry run - no changes made[/dim]')
+        return 0
+
+    # Confirm before deleting (unless -y flag was passed)
+    from .cli import should_prompt
+    if should_prompt():
+        console.print('[red]These tasks will be removed from .worktree-tasks.json[/red]')
+        console.print()
+        if not console.input('Continue? (yes/no): ').lower() == 'yes':
+            console.print('Cancelled.')
+            return 0
+
+    # Actually remove the tasks
+    result = cleanup_orphaned_tasks(dry_run=False)
+
+    if result['errors']:
+        for error in result['errors']:
+            console.print(f'[red]Error: {error}[/red]')
+        return 1
+
+    console.print()
+    console.print(f'[green]Removed {len(result["removed"])} orphaned tasks[/green]')
+
+    # Auto-commit if requested
+    if auto_commit:
+        console.print()
+        console.print('Committing changes...')
+        if auto_commit_tasks('Remove orphaned tasks via worktree-manager cleanup-tasks'):
+            console.print('[green]Changes committed[/green]')
+        else:
+            console.print('[dim]No changes to commit[/dim]')
+
+    console.print()
+    console.print(Panel.fit('[bold green]Cleanup Complete![/bold green]', border_style='green'))
     console.print()
 
     return 0

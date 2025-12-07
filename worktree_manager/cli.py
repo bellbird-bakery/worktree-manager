@@ -108,6 +108,22 @@ def main() -> int:
         help='Auto-commit changes to .worktree-tasks.json',
     )
 
+    # cleanup-tasks command
+    cleanup_tasks_parser = subparsers.add_parser(
+        'cleanup-tasks',
+        help='Remove orphaned tasks from JSON (tasks with no local worktree)',
+    )
+    cleanup_tasks_parser.add_argument(
+        '--dry-run',
+        action='store_true',
+        help='Show what would be removed without deleting',
+    )
+    cleanup_tasks_parser.add_argument(
+        '--commit',
+        action='store_true',
+        help='Auto-commit changes to .worktree-tasks.json',
+    )
+
     # setup command
     subparsers.add_parser('setup', help='Run interactive setup wizard')
 
@@ -181,6 +197,11 @@ def main() -> int:
             )
         elif args.command == 'init':
             return commands.init_cmd(from_legacy=args.from_legacy)
+        elif args.command == 'cleanup-tasks':
+            return commands.cleanup_tasks_cmd(
+                dry_run=args.dry_run,
+                auto_commit=args.commit,
+            )
         else:
             parser.print_help()
             return 1

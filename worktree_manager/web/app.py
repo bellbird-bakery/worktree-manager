@@ -54,21 +54,34 @@ def date_filter(value, format_str='M j, H:i'):
         except ValueError:
             return value
 
-    # Map Django format codes to Python strftime
+    # Map Django format codes to Python strftime using unique placeholders
+    # Each placeholder is fully unique to avoid replacement conflicts
     format_map = {
-        'M': '%b',      # Abbreviated month (Jan, Feb, etc.)
-        'j': '%-d',     # Day without leading zero
-        'd': '%d',      # Day with leading zero
-        'H': '%H',      # 24-hour
-        'i': '%M',      # Minute
-        's': '%S',      # Second
-        'Y': '%Y',      # 4-digit year
-        'y': '%y',      # 2-digit year
+        'M': '\x01',      # Abbreviated month (Jan, Feb, etc.) -> %b
+        'j': '\x02',      # Day without leading zero -> %-d
+        'd': '\x03',      # Day with leading zero -> %d
+        'H': '\x04',      # 24-hour -> %H
+        'i': '\x05',      # Minute -> %M
+        's': '\x06',      # Second -> %S
+        'Y': '\x07',      # 4-digit year -> %Y
+        'y': '\x08',      # 2-digit year -> %y
+    }
+    placeholder_to_strftime = {
+        '\x01': '%b',
+        '\x02': '%-d',
+        '\x03': '%d',
+        '\x04': '%H',
+        '\x05': '%M',
+        '\x06': '%S',
+        '\x07': '%Y',
+        '\x08': '%y',
     }
 
     py_format = format_str
-    for django_code, py_code in format_map.items():
-        py_format = py_format.replace(django_code, py_code)
+    for django_code, placeholder in format_map.items():
+        py_format = py_format.replace(django_code, placeholder)
+    for placeholder, strftime_code in placeholder_to_strftime.items():
+        py_format = py_format.replace(placeholder, strftime_code)
 
     try:
         return value.strftime(py_format)

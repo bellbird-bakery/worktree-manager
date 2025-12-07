@@ -478,6 +478,111 @@ def mark_synced(feature_name: str) -> bool:
     return True
 
 
+def cleanup_orphaned_tasks(repo_root: Path | str | None = None, dry_run: bool = False) -> dict:
+    """
+    Remove tasks from JSON and SQLite that have no corresponding local worktree.
+
+    An orphaned task is one where:
+    1. Task exists in JSON file or SQLite database
+    2. No worktree exists locally with that feature_name
+    3. Task is not in the worktree registry
+
+    This is useful for cleaning up tasks after worktrees have been manually deleted
+    or closed on another machine.
+
+    Args:
+        repo_root: Optional path to repo root
+        dry_run: If True, just return what would be removed without deleting
+
+    Returns:
+        dict with:
+        - removed: list of feature names that were removed (or would be)
+        - kept: list of feature names that were kept
+        - errors: list of error messages
+    """
+    from .registry import read_registry
+    from .git_ops import list_worktrees, get_main_repo_root
+
+    ensure_db()
+
+    if repo_root is not None:
+        repo_root = Path(repo_root)
+
+    store = read_tasks(repo_root)
+    result = {
+        'removed': [],
+        'kept': [],
+        'errors': [],
+    }
+
+    # Collect all feature names from both JSON and SQLite
+    all_features = set(store.get('tasks', {}).keys())
+    for task in tasks.all():
+        all_features.add(task.feature_name)
+
+    if not all_features:
+        return result
+
+    # Get registered worktrees
+    registry = read_registry()
+    registered_features = set()
+    if registry:
+        registered_features = {wt.feature_name for wt in registry.worktrees}
+
+    # Get actual git worktrees
+    try:
+        main_repo = get_main_repo_root()
+        git_worktrees = list_worktrees(str(main_repo))
+        git_worktree_branches = set()
+        for wt in git_worktrees:
+            # Extract feature name from branch (e.g., "feature/foo" -> "foo")
+            branch = wt.branch
+            for prefix in ('feature/', 'bugfix/', 'chore/', 'hotfix/'):
+                if branch.startswith(prefix):
+                    branch = branch[len(prefix):]
+                    break
+            git_worktree_branches.add(branch)
+    except Exception as e:
+        result['errors'].append(f'Could not list git worktrees: {e}')
+        git_worktree_branches = set()
+
+    # Determine which tasks to keep
+    tasks_to_remove = []
+    for feature_name in all_features:
+        # Keep if in registry
+        if feature_name in registered_features:
+            result['kept'].append(feature_name)
+            continue
+
+        # Keep if has active git worktree
+        if feature_name in git_worktree_branches:
+            result['kept'].append(feature_name)
+            continue
+
+        # Orphaned - mark for removal
+        tasks_to_remove.append(feature_name)
+
+    # Remove orphaned tasks (unless dry run)
+    if not dry_run:
+        for feature_name in tasks_to_remove:
+            # Remove from JSON
+            if feature_name in store.get('tasks', {}):
+                del store['tasks'][feature_name]
+
+            # Remove from SQLite
+            tasks.delete_by_feature(feature_name)
+
+            result['removed'].append(feature_name)
+
+        if tasks_to_remove:
+            if not write_tasks(store, repo_root):
+                result['errors'].append('Failed to write JSON file')
+    else:
+        result['removed'] = tasks_to_remove
+
+    return result
+
+
 def get_sync_status(repo_root: Path | str | None = None) -> dict:
     """
     Get overall sync status between JSON and SQLite.

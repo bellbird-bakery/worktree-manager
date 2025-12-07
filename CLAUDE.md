@@ -198,3 +198,6 @@ Dev (optional):
 - `pytest>=8.0.0` - Testing
 - `ruff>=0.8.0` - Linting/formatting
 - `mypy>=1.13.0` - Type checking
+
+## on template changes
+- uv tool install /home/jeremy/projects/worktree-manager --force

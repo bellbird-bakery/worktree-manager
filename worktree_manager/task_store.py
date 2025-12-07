@@ -92,6 +92,11 @@ class Task:
             self.updated_at = self.updated_at.replace(tzinfo=timezone.utc)
 
     @property
+    def pk(self) -> int | None:
+        """Alias for id (Django compatibility)."""
+        return self.id
+
+    @property
     def status_display(self) -> str:
         """Get human-readable status name."""
         return TaskStatus.display_name(self.status)

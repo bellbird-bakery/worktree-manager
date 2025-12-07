@@ -89,7 +89,11 @@ def compose_up(
     if detach:
         cmd.append('-d')
 
+    # Build environment, removing port-related vars that might conflict with worktree's .env
+    # Shell env vars take precedence over .env file, so we must remove them
     env = os.environ.copy()
+    for var in ('DB_PORT', 'WEB_PORT', 'POSTGRES_PORT', 'REDIS_PORT'):
+        env.pop(var, None)
     env['COMPOSE_PROJECT_NAME'] = project_name
 
     try:
@@ -140,7 +144,10 @@ def compose_down(worktree_path: str, project_name: str, volumes: bool = False) -
     if volumes:
         cmd.append('-v')
 
+    # Build environment, removing port-related vars that might conflict with worktree's .env
     env = os.environ.copy()
+    for var in ('DB_PORT', 'WEB_PORT', 'POSTGRES_PORT', 'REDIS_PORT'):
+        env.pop(var, None)
     env['COMPOSE_PROJECT_NAME'] = project_name
 
     try:
@@ -156,53 +163,22 @@ def compose_down(worktree_path: str, project_name: str, volumes: bool = False) -
 
 def fix_permissions(worktree_path: str, project_name: str) -> bool:
     """
-    Fix file permissions in worktree by running chown inside the container.
+    Fix file permissions in worktree.
 
-    Docker containers often run as root, creating files owned by root.
-    This runs chown inside the web container to fix ownership before closing.
+    Note: This function is now a no-op because containers run as the current user
+    (via UID/GID in .env), so files are created with correct ownership.
+
+    Kept for backwards compatibility - callers don't need to change.
 
     Args:
         worktree_path: Path to the worktree.
         project_name: Docker Compose project name.
 
     Returns:
-        True if successful, False otherwise.
+        Always returns True since permissions are correct by default.
     """
-    import pwd
-
-    # Get current user's UID and GID
-    uid = os.getuid()
-    gid = os.getgid()
-
-    cmd = [
-        'docker',
-        'compose',
-        '-f',
-        'docker-compose.local.yml',
-        'exec',
-        '-T',
-        'web',
-        'chown',
-        '-R',
-        f'{uid}:{gid}',
-        '/app',
-    ]
-
-    env = os.environ.copy()
-    env['COMPOSE_PROJECT_NAME'] = project_name
-
-    try:
-        subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-            cwd=worktree_path,
-            env=env,
-            timeout=60,
-        )
-        return True
-    except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
-        return False
+    # No-op: containers now run as current user via UID/GID in .env
+    return True
 
 
 def compose_ps(worktree_path: str, project_name: str) -> list[DockerContainer]:
@@ -218,7 +194,10 @@ def compose_ps(worktree_path: str, project_name: str) -> list[DockerContainer]:
     """
     cmd = ['docker', 'compose', '-f', 'docker-compose.local.yml', 'ps', '--format', 'json']
 
+    # Build environment, removing port-related vars that might conflict with worktree's .env
     env = os.environ.copy()
+    for var in ('DB_PORT', 'WEB_PORT', 'POSTGRES_PORT', 'REDIS_PORT'):
+        env.pop(var, None)
     env['COMPOSE_PROJECT_NAME'] = project_name
 
     try:
