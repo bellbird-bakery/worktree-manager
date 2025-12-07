@@ -103,7 +103,7 @@
         <div class="card text-center">
             <div class="card-body">
                 <h2 class="text-info">
-                    {{ sync_status.json_only|length|add:sync_status.sqlite_only|length }}
+                    {{ sync_status.json_only|length + sync_status.sqlite_only|length }}
                 </h2>
                 <p class="mb-0 text-muted">Pending Sync</p>
             </div>
