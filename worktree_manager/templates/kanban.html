@@ -28,7 +28,7 @@
                             {% include "partials/card.html" %}
                         </div>
                     </div>
-                {% empty %}
+                {% else %}
                     <div class="kanban-empty">
                         <i class="bi bi-inbox text-muted"></i>
                         <span>No tasks</span>
@@ -57,7 +57,7 @@
                             {% include "partials/card.html" %}
                         </div>
                     </div>
-                {% empty %}
+                {% else %}
                     <div class="kanban-empty">
                         <i class="bi bi-inbox text-muted"></i>
                         <span>No tasks</span>
@@ -86,7 +86,7 @@
                             {% include "partials/card.html" %}
                         </div>
                     </div>
-                {% empty %}
+                {% else %}
                     <div class="kanban-empty">
                         <i class="bi bi-inbox text-muted"></i>
                         <span>No tasks</span>

@@ -34,8 +34,8 @@
             <i class="bi bi-chevron-right"></i>
         </div>
         <small class="text-muted">
-            JSON updated: {{ conflict.json_updated_at|date:"M j, H:i" }} |
-            Local updated: {{ conflict.sqlite_updated_at|date:"M j, H:i" }}
+            JSON updated: {{ conflict.json_updated_at|date("M j, H:i") }} |
+            Local updated: {{ conflict.sqlite_updated_at|date("M j, H:i") }}
         </small>
     </a>
     {% endfor %}

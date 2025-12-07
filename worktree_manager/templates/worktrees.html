@@ -70,7 +70,7 @@
                 {% if wt.updated_at %}
                 <small class="text-muted d-block">
                     <i class="bi bi-clock me-1"></i>
-                    Updated: {{ wt.updated_at|date:"M j, H:i" }}
+                    Updated: {{ wt.updated_at|date("M j, H:i") }}
                 </small>
                 {% endif %}
             </div>
@@ -99,7 +99,7 @@
             </div>
         </div>
     </div>
-    {% empty %}
+    {% else %}
     <div class="col-12">
         <div class="alert alert-info">
             <i class="bi bi-info-circle me-2"></i>
