@@ -21,7 +21,7 @@ from starlette.routing import Mount, Route
 from starlette.staticfiles import StaticFiles
 from starlette.templating import Jinja2Templates
 
-from . import routes, api
+from . import api, routes
 
 logger = logging.getLogger('worktree_manager')
 
@@ -57,14 +57,14 @@ def date_filter(value, format_str='M j, H:i'):
     # Map Django format codes to Python strftime using unique placeholders
     # Each placeholder is fully unique to avoid replacement conflicts
     format_map = {
-        'M': '\x01',      # Abbreviated month (Jan, Feb, etc.) -> %b
-        'j': '\x02',      # Day without leading zero -> %-d
-        'd': '\x03',      # Day with leading zero -> %d
-        'H': '\x04',      # 24-hour -> %H
-        'i': '\x05',      # Minute -> %M
-        's': '\x06',      # Second -> %S
-        'Y': '\x07',      # 4-digit year -> %Y
-        'y': '\x08',      # 2-digit year -> %y
+        'M': '\x01',  # Abbreviated month (Jan, Feb, etc.) -> %b
+        'j': '\x02',  # Day without leading zero -> %-d
+        'd': '\x03',  # Day with leading zero -> %d
+        'H': '\x04',  # 24-hour -> %H
+        'i': '\x05',  # Minute -> %M
+        's': '\x06',  # Second -> %S
+        'Y': '\x07',  # 4-digit year -> %Y
+        'y': '\x08',  # 2-digit year -> %y
     }
     placeholder_to_strftime = {
         '\x01': '%b',
@@ -172,6 +172,7 @@ def create_app() -> Starlette:
     """Create and configure the Starlette application."""
     # Ensure task database is initialized
     from ..task_store import ensure_db
+
     ensure_db()
 
     # Define routes
@@ -180,33 +181,40 @@ def create_app() -> Starlette:
         Route('/', routes.kanban_board, name='kanban'),
         Route('/tasks/{pk:int}/move/', routes.move_task, methods=['POST'], name='move_task'),
         Route('/tasks/{pk:int}/confirm/', routes.confirm_hook, methods=['POST'], name='confirm_hook'),
-
         # Worktree management
         Route('/worktrees/', routes.worktree_list, name='worktree_list'),
         Route('/worktrees/create/', routes.worktree_create, methods=['GET', 'POST'], name='worktree_create'),
         Route('/worktrees/{feature_name}/status/', routes.worktree_status, name='worktree_status'),
         Route('/worktrees/{feature_name}/close/', routes.worktree_close, methods=['POST'], name='worktree_close'),
-
         # Sync status and actions
         Route('/sync/', routes.sync_status_view, name='sync_status'),
         Route('/sync/pull/', routes.sync_pull, methods=['POST'], name='sync_pull'),
         Route('/sync/push/', routes.sync_push, methods=['POST'], name='sync_push'),
-
         # Conflict resolution
         Route('/conflicts/', routes.conflict_list, name='conflict_list'),
         Route('/conflicts/{feature_name}/', routes.conflict_detail, name='conflict_detail'),
         Route('/conflicts/{feature_name}/resolve/', routes.conflict_resolve, methods=['POST'], name='conflict_resolve'),
-
         # Database cloning
         Route('/worktrees/{target_feature}/clone-db/', routes.clone_db_form, name='clone_db_form'),
-        Route('/worktrees/{target_feature}/clone-db/run/', routes.clone_db_action, methods=['POST'], name='clone_db_action'),
-
+        Route(
+            '/worktrees/{target_feature}/clone-db/run/',
+            routes.clone_db_action,
+            methods=['POST'],
+            name='clone_db_action',
+        ),
+        # Production database restore
+        Route('/worktrees/{target_feature}/restore-prod/', routes.restore_prod_form, name='restore_prod_form'),
+        Route(
+            '/worktrees/{target_feature}/restore-prod/run/',
+            routes.restore_prod_action,
+            methods=['POST'],
+            name='restore_prod_action',
+        ),
         # API routes
         Route('/api/sync/', api.sync_tasks, methods=['POST'], name='api_sync'),
         Route('/api/tasks/', api.list_tasks, name='api_tasks'),
         Route('/api/tasks/{pk:int}/', api.get_task, name='api_task_detail'),
         Route('/api/tasks/{pk:int}/status/', api.update_task_status, methods=['POST'], name='api_task_status'),
-
         # Static files
         Mount('/static', StaticFiles(directory=str(STATIC_DIR)), name='static'),
     ]
@@ -229,6 +237,7 @@ def run_server(host: str = '127.0.0.1', port: int = 8000) -> None:
     # Sync from JSON on startup
     try:
         from ..sync import sync_json_to_sqlite
+
         result = sync_json_to_sqlite()
         if result.created or result.updated:
             logger.info(f'Synced from JSON: {result.created} created, {result.updated} updated')

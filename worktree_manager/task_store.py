@@ -11,14 +11,15 @@ import json
 import logging
 import os
 import sqlite3
+from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from enum import Enum
 from pathlib import Path
-from typing import Iterator, TypedDict
+from typing import TypedDict
 
-from . import CONFIG_DIR, TASK_DB_PATH
+from . import TASK_DB_PATH
 
 logger = logging.getLogger('worktree_manager')
 
@@ -77,8 +78,8 @@ class Task:
     notes: str = ''
 
     # Auto-managed timestamps
-    created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
-    updated_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
+    updated_at: datetime = field(default_factory=lambda: datetime.now(UTC))
     last_synced_at: datetime | None = None
 
     # Database ID (set when loaded from SQLite)
@@ -87,9 +88,9 @@ class Task:
     def __post_init__(self) -> None:
         """Ensure timestamps have timezone info."""
         if self.created_at.tzinfo is None:
-            self.created_at = self.created_at.replace(tzinfo=timezone.utc)
+            self.created_at = self.created_at.replace(tzinfo=UTC)
         if self.updated_at.tzinfo is None:
-            self.updated_at = self.updated_at.replace(tzinfo=timezone.utc)
+            self.updated_at = self.updated_at.replace(tzinfo=UTC)
 
     @property
     def pk(self) -> int | None:
@@ -108,17 +109,17 @@ class Task:
     def start(self) -> None:
         """Move task to In Progress status."""
         self.status = TaskStatus.IN_PROGRESS.value
-        self.updated_at = datetime.now(timezone.utc)
+        self.updated_at = datetime.now(UTC)
 
     def complete(self) -> None:
         """Move task to Done status."""
         self.status = TaskStatus.DONE.value
-        self.updated_at = datetime.now(timezone.utc)
+        self.updated_at = datetime.now(UTC)
 
     def reopen(self) -> None:
         """Move task back to To Do status."""
         self.status = TaskStatus.TODO.value
-        self.updated_at = datetime.now(timezone.utc)
+        self.updated_at = datetime.now(UTC)
 
     def to_dict(self) -> dict:
         """Convert to dictionary for JSON serialization."""
@@ -137,11 +138,11 @@ class Task:
     @classmethod
     def from_dict(cls, feature_name: str, data: dict) -> Task:
         """Create Task from dictionary (e.g., from JSON)."""
-        created_at = parse_timestamp(data.get('created_at', '')) if data.get('created_at') else datetime.now(
-            timezone.utc
+        created_at = (
+            parse_timestamp(data.get('created_at', '')) if data.get('created_at') else datetime.now(UTC)
         )
-        updated_at = parse_timestamp(data.get('updated_at', '')) if data.get('updated_at') else datetime.now(
-            timezone.utc
+        updated_at = (
+            parse_timestamp(data.get('updated_at', '')) if data.get('updated_at') else datetime.now(UTC)
         )
         last_synced_at = parse_timestamp(data['last_synced_at']) if data.get('last_synced_at') else None
 
@@ -276,15 +277,15 @@ def task_to_json(
 
     Timestamps are normalized to UTC ISO 8601 format.
     """
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     created = created_at or now
     updated = updated_at or now
 
     # Ensure UTC
     if created.tzinfo is None:
-        created = created.replace(tzinfo=timezone.utc)
+        created = created.replace(tzinfo=UTC)
     if updated.tzinfo is None:
-        updated = updated.replace(tzinfo=timezone.utc)
+        updated = updated.replace(tzinfo=UTC)
 
     return {
         'title': title,
@@ -301,7 +302,7 @@ def task_to_json(
 def parse_timestamp(iso_string: str) -> datetime:
     """Parse an ISO 8601 timestamp string to datetime."""
     if not iso_string:
-        return datetime.now(timezone.utc)
+        return datetime.now(UTC)
     # Handle both 'Z' suffix and '+00:00' formats
     if iso_string.endswith('Z'):
         iso_string = iso_string[:-1] + '+00:00'
@@ -350,7 +351,7 @@ def update_task_status(
 
     task = store['tasks'][feature_name]
     task['status'] = status
-    task['updated_at'] = datetime.now(timezone.utc).isoformat()
+    task['updated_at'] = datetime.now(UTC).isoformat()
 
     return write_tasks(store, repo_root)
 
@@ -398,7 +399,7 @@ def db_connection() -> Iterator[sqlite3.Connection]:
 def init_db() -> None:
     """Initialize the SQLite database schema."""
     with db_connection() as conn:
-        conn.execute('''
+        conn.execute("""
             CREATE TABLE IF NOT EXISTS tasks (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 feature_name TEXT UNIQUE NOT NULL,
@@ -412,7 +413,7 @@ def init_db() -> None:
                 updated_at TEXT NOT NULL,
                 last_synced_at TEXT
             )
-        ''')
+        """)
         conn.execute('CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status)')
         conn.execute('CREATE INDEX IF NOT EXISTS idx_tasks_feature ON tasks(feature_name)')
 
@@ -493,19 +494,19 @@ class TaskManager:
     def create(self, **kwargs) -> Task:
         """Create a new task."""
         init_db()
-        now = datetime.now(timezone.utc).isoformat()
+        now = datetime.now(UTC).isoformat()
 
         feature_name = kwargs['feature_name']
         title = kwargs.get('title', feature_name.replace('-', ' ').replace('_', ' ').title())
 
         with db_connection() as conn:
             cursor = conn.execute(
-                '''
+                """
                 INSERT INTO tasks (
                     feature_name, title, description, status, worktree_path,
                     priority, notes, created_at, updated_at
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ''',
+                """,
                 (
                     feature_name,
                     title,
@@ -552,7 +553,7 @@ class TaskManager:
             raise ValueError('Cannot update task without id')
 
         init_db()
-        now = datetime.now(timezone.utc).isoformat()
+        now = datetime.now(UTC).isoformat()
 
         # Build update query
         updates = ['updated_at = ?']
@@ -568,7 +569,7 @@ class TaskManager:
         params.append(task.id)
 
         with db_connection() as conn:
-            conn.execute(f"UPDATE tasks SET {', '.join(updates)} WHERE id = ?", params)
+            conn.execute(f'UPDATE tasks SET {", ".join(updates)} WHERE id = ?', params)
 
         return self.get_by_pk(task.id)
 
@@ -601,18 +602,18 @@ def save_task(task: Task) -> Task:
     If task has an id, updates existing. Otherwise creates new.
     """
     init_db()
-    now = datetime.now(timezone.utc).isoformat()
+    now = datetime.now(UTC).isoformat()
 
     if task.id is not None:
         # Update existing
         with db_connection() as conn:
             conn.execute(
-                '''
+                """
                 UPDATE tasks SET
                     title = ?, description = ?, status = ?, worktree_path = ?,
                     priority = ?, notes = ?, updated_at = ?, last_synced_at = ?
                 WHERE id = ?
-                ''',
+                """,
                 (
                     task.title,
                     task.description,
@@ -636,12 +637,12 @@ def save_task(task: Task) -> Task:
         # Create new
         with db_connection() as conn:
             cursor = conn.execute(
-                '''
+                """
                 INSERT INTO tasks (
                     feature_name, title, description, status, worktree_path,
                     priority, notes, created_at, updated_at, last_synced_at
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ''',
+                """,
                 (
                     task.feature_name,
                     task.title,

@@ -6,16 +6,14 @@ Starlette-based routes replacing Django views.
 
 from __future__ import annotations
 
-import json
 import logging
-import mimetypes
 import subprocess
 from pathlib import Path
 
 from starlette.requests import Request
 from starlette.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 
-from ..docker_ops import compose_down, fix_permissions, is_docker_running
+from ..docker_ops import clone_postgres_database, compose_down, fix_permissions, is_docker_running
 from ..git_ops import (
     get_main_repo_root,
     has_uncommitted_changes_in_path,
@@ -33,7 +31,6 @@ from ..sync import (
     sync_sqlite_to_json,
 )
 from ..task_store import (
-    Task,
     TaskStatus,
     find_repo_root,
     get_task_file,
@@ -65,6 +62,22 @@ async def kanban_board(request: Request) -> Response:
     todo_tasks = tasks_by_status[TaskStatus.TODO.value]
     in_progress_tasks = tasks_by_status[TaskStatus.IN_PROGRESS.value]
     done_tasks = tasks_by_status[TaskStatus.DONE.value]
+
+    # Get worktree registry and enrich tasks with worktree info
+    registry = read_registry()
+    local_worktrees = {wt.feature_name: wt for wt in registry.worktrees} if registry else {}
+
+    def enrich_task(task):
+        """Add worktree info to task object."""
+        wt = local_worktrees.get(task.feature_name)
+        task.has_worktree = wt is not None
+        task.web_port = wt.ports.web if wt else None
+        task.db_port = wt.ports.db if wt else None
+        return task
+
+    todo_tasks = [enrich_task(t) for t in todo_tasks]
+    in_progress_tasks = [enrich_task(t) for t in in_progress_tasks]
+    done_tasks = [enrich_task(t) for t in done_tasks]
 
     total_count = len(todo_tasks) + len(in_progress_tasks) + len(done_tasks)
 
@@ -120,14 +133,16 @@ async def move_task(request: Request) -> Response:
         pre_result = hook_manager.pre_check(ctx)
 
         if pre_result and pre_result.requires_confirmation:
-            return JSONResponse({
-                'needs_confirmation': True,
-                'confirmation_type': pre_result.confirmation_type,
-                'data': pre_result.confirmation_data,
-                'task_id': task.id,
-                'old_status': old_status,
-                'new_status': new_status,
-            })
+            return JSONResponse(
+                {
+                    'needs_confirmation': True,
+                    'confirmation_type': pre_result.confirmation_type,
+                    'data': pre_result.confirmation_data,
+                    'task_id': task.id,
+                    'old_status': old_status,
+                    'new_status': new_status,
+                }
+            )
     except ImportError:
         # Hooks not available
         hook_manager = None
@@ -151,14 +166,15 @@ async def move_task(request: Request) -> Response:
     except Exception as e:
         logger.warning(f'JSON sync failed after task move: {e}')
 
-    return JSONResponse({
-        'success': True,
-        'message': f'Task moved from {old_status} to {new_status}',
-        'hooks': [
-            {'name': r.hook_name, 'success': r.success, 'message': r.message}
-            for r in hook_results
-        ] if hook_results else [],
-    })
+    return JSONResponse(
+        {
+            'success': True,
+            'message': f'Task moved from {old_status} to {new_status}',
+            'hooks': [{'name': r.hook_name, 'success': r.success, 'message': r.message} for r in hook_results]
+            if hook_results
+            else [],
+        }
+    )
 
 
 async def confirm_hook(request: Request) -> Response:
@@ -215,14 +231,15 @@ async def confirm_hook(request: Request) -> Response:
     except Exception as e:
         logger.warning(f'JSON sync failed after task move: {e}')
 
-    return JSONResponse({
-        'success': True,
-        'message': f'Task moved to {new_status}',
-        'hooks': [
-            {'name': r.hook_name, 'success': r.success, 'message': r.message}
-            for r in hook_results
-        ] if hook_results else [],
-    })
+    return JSONResponse(
+        {
+            'success': True,
+            'message': f'Task moved to {new_status}',
+            'hooks': [{'name': r.hook_name, 'success': r.success, 'message': r.message} for r in hook_results]
+            if hook_results
+            else [],
+        }
+    )
 
 
 # ==============================================================================
@@ -251,35 +268,39 @@ async def worktree_list(request: Request) -> Response:
 
     for task in all_tasks:
         local_wt = local_worktrees.get(task.feature_name)
-        worktree_data.append({
-            'feature_name': task.feature_name,
-            'title': task.title,
-            'status': task.status,
-            'status_display': task.status_display,
-            'has_local_worktree': local_wt is not None,
-            'path': local_wt.path if local_wt else None,
-            'web_port': local_wt.ports.web if local_wt else None,
-            'db_port': local_wt.ports.db if local_wt else None,
-            'updated_at': task.updated_at,
-            'last_synced_at': task.last_synced_at,
-        })
+        worktree_data.append(
+            {
+                'feature_name': task.feature_name,
+                'title': task.title,
+                'status': task.status,
+                'status_display': task.status_display,
+                'has_local_worktree': local_wt is not None,
+                'path': local_wt.path if local_wt else None,
+                'web_port': local_wt.ports.web if local_wt else None,
+                'db_port': local_wt.ports.db if local_wt else None,
+                'updated_at': task.updated_at,
+                'last_synced_at': task.last_synced_at,
+            }
+        )
         seen_features.add(task.feature_name)
 
     # Add local worktrees without tasks
     for feature_name, wt in local_worktrees.items():
         if feature_name not in seen_features:
-            worktree_data.append({
-                'feature_name': feature_name,
-                'title': feature_name.replace('-', ' ').replace('_', ' ').title(),
-                'status': None,
-                'status_display': 'No Task',
-                'has_local_worktree': True,
-                'path': wt.path,
-                'web_port': wt.ports.web,
-                'db_port': wt.ports.db,
-                'updated_at': None,
-                'last_synced_at': None,
-            })
+            worktree_data.append(
+                {
+                    'feature_name': feature_name,
+                    'title': feature_name.replace('-', ' ').replace('_', ' ').title(),
+                    'status': None,
+                    'status_display': 'No Task',
+                    'has_local_worktree': True,
+                    'path': wt.path,
+                    'web_port': wt.ports.web,
+                    'db_port': wt.ports.db,
+                    'updated_at': None,
+                    'last_synced_at': None,
+                }
+            )
 
     # Sort by status then feature name
     status_order = {
@@ -387,11 +408,13 @@ async def worktree_status(request: Request) -> Response:
     worktree_path = entry.path
 
     if not Path(worktree_path).exists():
-        return JSONResponse({
-            'exists': False,
-            'can_close': True,
-            'warnings': [],
-        })
+        return JSONResponse(
+            {
+                'exists': False,
+                'can_close': True,
+                'warnings': [],
+            }
+        )
 
     # Check git status
     has_uncommitted = has_uncommitted_changes_in_path(worktree_path)
@@ -420,15 +443,17 @@ async def worktree_status(request: Request) -> Response:
     if not is_merged:
         warnings.append('unmerged')
 
-    return JSONResponse({
-        'exists': True,
-        'branch': branch_name,
-        'has_uncommitted': has_uncommitted,
-        'has_unpushed': has_unpushed,
-        'is_merged': is_merged,
-        'warnings': warnings,
-        'can_close': len(warnings) == 0,
-    })
+    return JSONResponse(
+        {
+            'exists': True,
+            'branch': branch_name,
+            'has_uncommitted': has_uncommitted,
+            'has_unpushed': has_unpushed,
+            'is_merged': is_merged,
+            'warnings': warnings,
+            'can_close': len(warnings) == 0,
+        }
+    )
 
 
 async def worktree_close(request: Request) -> Response:
@@ -463,12 +488,15 @@ async def worktree_close(request: Request) -> Response:
 
             # Mark task as done
             from ..commands import complete_task_for_worktree
+
             complete_task_for_worktree(feature_name)
 
-            return JSONResponse({
-                'success': True,
-                'message': f'Cleaned up registry entry for {feature_name}',
-            })
+            return JSONResponse(
+                {
+                    'success': True,
+                    'message': f'Cleaned up registry entry for {feature_name}',
+                }
+            )
         except Exception as e:
             logger.error(f'Failed to clean up registry: {e}')
             return JSONResponse({'error': str(e)}, status_code=500)
@@ -543,15 +571,18 @@ async def worktree_close(request: Request) -> Response:
     # Step 5: Mark task as done
     try:
         from ..commands import complete_task_for_worktree
+
         complete_task_for_worktree(feature_name)
     except Exception as e:
         errors.append(f'Task update warning: {e}')
 
-    return JSONResponse({
-        'success': True,
-        'message': f'Worktree "{feature_name}" closed successfully',
-        'warnings': errors if errors else None,
-    })
+    return JSONResponse(
+        {
+            'success': True,
+            'message': f'Worktree "{feature_name}" closed successfully',
+            'warnings': errors if errors else None,
+        }
+    )
 
 
 # ==============================================================================
@@ -584,13 +615,15 @@ async def sync_pull(request: Request) -> Response:
     result = sync_json_to_sqlite()
 
     if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
-        return JSONResponse({
-            'success': True,
-            'created': result.created,
-            'updated': result.updated,
-            'unchanged': result.unchanged,
-            'errors': result.errors,
-        })
+        return JSONResponse(
+            {
+                'success': True,
+                'created': result.created,
+                'updated': result.updated,
+                'unchanged': result.unchanged,
+                'errors': result.errors,
+            }
+        )
 
     return RedirectResponse(url=request.url_for('sync_status'), status_code=303)
 
@@ -600,13 +633,15 @@ async def sync_push(request: Request) -> Response:
     result = sync_sqlite_to_json()
 
     if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
-        return JSONResponse({
-            'success': True,
-            'created': result.created,
-            'updated': result.updated,
-            'unchanged': result.unchanged,
-            'errors': result.errors,
-        })
+        return JSONResponse(
+            {
+                'success': True,
+                'created': result.created,
+                'updated': result.updated,
+                'unchanged': result.unchanged,
+                'errors': result.errors,
+            }
+        )
 
     return RedirectResponse(url=request.url_for('sync_status'), status_code=303)
 
@@ -709,22 +744,26 @@ async def clone_db_form(request: Request) -> Response:
         if not compose_file.exists():
             compose_file = main_repo_path / 'docker-compose.yml'
         if compose_file.exists():
-            sources.append({
-                'index': 0,
-                'feature_name': 'develop (main repo)',
-                'path': str(main_repo_path),
-                'is_main': True,
-            })
+            sources.append(
+                {
+                    'index': 0,
+                    'feature_name': 'develop (main repo)',
+                    'path': str(main_repo_path),
+                    'is_main': True,
+                }
+            )
 
     # Add other worktrees
     for wt in registry.worktrees:
         if wt.feature_name != target_feature and Path(wt.path).exists():
-            sources.append({
-                'index': wt.index,
-                'feature_name': wt.feature_name,
-                'path': wt.path,
-                'is_main': False,
-            })
+            sources.append(
+                {
+                    'index': wt.index,
+                    'feature_name': wt.feature_name,
+                    'path': wt.path,
+                    'is_main': False,
+                }
+            )
 
     sources.sort(key=lambda x: x['index'])
 
@@ -776,36 +815,162 @@ async def clone_db_action(request: Request) -> Response:
         source_path = source.path
         source_name = source.feature_name
 
-    # Find the clone script
-    try:
-        main_repo = get_main_repo_root()
-        script_path = main_repo / 'scripts' / 'worktree-db-clone.sh'
-    except Exception:
-        script_path = None
+    # Clone database using Python function
+    output_lines: list[str] = []
 
-    if not script_path or not script_path.exists():
-        return JSONResponse({'error': 'Clone script not found'}, status_code=500)
+    def collect_output(line: str) -> None:
+        output_lines.append(line)
 
-    # Run the clone script with --yes flag
     try:
-        result = subprocess.run(
-            [str(script_path), '--yes', source_path, target.path],
-            capture_output=True,
-            text=True,
-            timeout=300,
+        success, message = clone_postgres_database(
+            source_path=source_path,
+            target_path=target.path,
+            on_output=collect_output,
         )
 
-        if result.returncode == 0:
-            return JSONResponse({
-                'success': True,
-                'message': f'Database cloned from {source_name} to {target.feature_name}',
-                'output': result.stdout,
-            })
+        output = '\n'.join(output_lines)
+
+        if success:
+            return JSONResponse(
+                {
+                    'success': True,
+                    'message': f'Database cloned from {source_name} to {target.feature_name}',
+                    'output': output,
+                }
+            )
         else:
             return JSONResponse(
                 {
                     'success': False,
-                    'error': 'Clone failed',
+                    'error': message,
+                    'output': output,
+                },
+                status_code=500,
+            )
+
+    except Exception as e:
+        logger.error(f'Clone failed: {e}')
+        return JSONResponse({'success': False, 'error': str(e)}, status_code=500)
+
+
+# Production restore script path and dumps directory
+PROD_RESTORE_SCRIPT = Path('/home/jeremy/projects/dispatch-guru/database_tools/update_local_restore.sh')
+PROD_DUMPS_DIR = Path('/home/jeremy/projects/dispatch-guru/database_tools/dumps')
+
+
+def get_latest_prod_dump() -> dict | None:
+    """Find the latest production database dump and return its info."""
+    if not PROD_DUMPS_DIR.exists():
+        return None
+
+    # Find all prod_dump files
+    dumps = list(PROD_DUMPS_DIR.glob('prod_dump-*.psql'))
+    if not dumps:
+        return None
+
+    # Sort by modification time, newest first
+    dumps.sort(key=lambda p: p.stat().st_mtime, reverse=True)
+    latest = dumps[0]
+    stat = latest.stat()
+
+    from datetime import datetime
+
+    return {
+        'filename': latest.name,
+        'path': str(latest),
+        'size_mb': round(stat.st_size / (1024 * 1024), 1),
+        'modified': datetime.fromtimestamp(stat.st_mtime),
+        'age_hours': round((datetime.now().timestamp() - stat.st_mtime) / 3600, 1),
+    }
+
+
+async def restore_prod_form(request: Request) -> Response:
+    """Display production database restore form."""
+    templates = get_templates(request)
+    target_feature = request.path_params['target_feature']
+
+    registry = read_registry()
+    if not registry:
+        return HTMLResponse('Registry not found', status_code=500)
+
+    target = registry.find_by_feature(target_feature)
+    if not target:
+        return RedirectResponse('/worktrees/', status_code=302)
+
+    # Check if script exists
+    script_exists = PROD_RESTORE_SCRIPT.exists()
+
+    # Get latest cached dump info
+    latest_dump = get_latest_prod_dump()
+
+    return templates.TemplateResponse(
+        request,
+        'restore_prod.html',
+        {
+            'target': target,
+            'script_exists': script_exists,
+            'script_path': str(PROD_RESTORE_SCRIPT),
+            'docker_running': is_docker_running(),
+            'latest_dump': latest_dump,
+        },
+    )
+
+
+async def restore_prod_action(request: Request) -> Response:
+    """Execute production database restore."""
+    target_feature = request.path_params['target_feature']
+    form = await request.form()
+
+    registry = read_registry()
+    if not registry:
+        return JSONResponse({'error': 'No registry found'}, status_code=400)
+
+    target = registry.find_by_feature(target_feature)
+    if not target:
+        return JSONResponse({'error': f'Target worktree "{target_feature}" not found'}, status_code=404)
+
+    if not PROD_RESTORE_SCRIPT.exists():
+        return JSONResponse(
+            {'error': f'Production restore script not found at {PROD_RESTORE_SCRIPT}'},
+            status_code=500,
+        )
+
+    # Build command flags from form options
+    flags = []
+    if form.get('skip_dump'):
+        flags.append('--skip-dump')
+    if form.get('skip_local_backup'):
+        flags.append('--skip-local-backup')
+
+    # Set up environment with DG_PATH pointing to target worktree
+    env = subprocess.os.environ.copy()
+    env['DG_PATH'] = target.path
+
+    try:
+        # Run from script's directory so $PWD/dumps resolves correctly in .env
+        result = subprocess.run(
+            [str(PROD_RESTORE_SCRIPT)] + flags,
+            env=env,
+            cwd=PROD_RESTORE_SCRIPT.parent,
+            input='y\n',  # Auto-confirm the "Continue? (y/N)" prompt
+            capture_output=True,
+            text=True,
+            timeout=600,  # 10 minutes for large databases
+        )
+
+        if result.returncode == 0:
+            return JSONResponse(
+                {
+                    'success': True,
+                    'message': f'Production database restored to {target.feature_name}',
+                    'output': result.stdout,
+                }
+            )
+        else:
+            return JSONResponse(
+                {
+                    'success': False,
+                    'error': 'Restore failed',
                     'output': result.stdout + result.stderr,
                 },
                 status_code=500,
@@ -813,9 +978,9 @@ async def clone_db_action(request: Request) -> Response:
 
     except subprocess.TimeoutExpired:
         return JSONResponse(
-            {'success': False, 'error': 'Clone timed out after 5 minutes'},
+            {'success': False, 'error': 'Restore timed out after 10 minutes'},
             status_code=500,
         )
     except Exception as e:
-        logger.error(f'Clone failed: {e}')
+        logger.error(f'Production restore failed: {e}')
         return JSONResponse({'success': False, 'error': str(e)}, status_code=500)

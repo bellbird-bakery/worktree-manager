@@ -19,7 +19,6 @@ import re
 import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
 
 from . import CONFIG_DIR_NAME, LEGACY_CONFIG_DIR, PROJECT_CONFIG_FILE
 

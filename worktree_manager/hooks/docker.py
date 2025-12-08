@@ -12,8 +12,8 @@ from rich.console import Console
 
 from ..config import get_config
 from ..docker_ops import DockerError, compose_down, compose_ps, compose_up
-from . import HookResult, TransitionContext
 from ..task_store import TaskStatus
+from . import HookResult, TransitionContext
 
 logger = logging.getLogger('worktree_manager.hooks')
 console = Console()

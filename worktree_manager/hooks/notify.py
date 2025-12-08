@@ -11,8 +11,8 @@ import subprocess
 
 from rich.console import Console
 
-from . import HookResult, TransitionContext
 from ..task_store import TaskStatus
+from . import HookResult, TransitionContext
 
 logger = logging.getLogger('worktree_manager.hooks')
 console = Console()
@@ -45,10 +45,7 @@ class ConsoleNotifyHook:
         old_name, _ = STATUS_DISPLAY.get(ctx.old_status, (ctx.old_status, 'white'))
         new_name, new_color = STATUS_DISPLAY.get(ctx.new_status, (ctx.new_status, 'white'))
 
-        console.print(
-            f'[bold]{ctx.task.title}[/bold]: '
-            f'{old_name} -> [{new_color}]{new_name}[/{new_color}]'
-        )
+        console.print(f'[bold]{ctx.task.title}[/bold]: {old_name} -> [{new_color}]{new_name}[/{new_color}]')
 
         return HookResult(
             success=True,

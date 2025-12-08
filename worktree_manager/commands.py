@@ -21,6 +21,7 @@ from rich.table import Table
 
 from .docker_ops import (
     DockerError,
+    clone_postgres_database,
     compose_down,
     compose_ps,
     fix_permissions,
@@ -479,23 +480,23 @@ def clone_database(source_index: int) -> int:
     console.print(f'Target: [cyan]{target.feature_name}[/cyan] (index {target.index})')
     console.print()
 
-    # Use the bash script for now (it has rollback logic)
-    script_path = Path(__file__).parent.parent / 'scripts' / 'worktree-db-clone.sh'
-    if not script_path.exists():
-        # Try from main repo
-        script_path = get_main_repo_root() / 'scripts' / 'worktree-db-clone.sh'
+    # Clone using Python function
+    def on_output(line: str) -> None:
+        console.print(f'  {line}')
 
-    if script_path.exists():
-        try:
-            result = subprocess.run(
-                [str(script_path), source.path, target.path],
-                check=True,
-            )
-            return result.returncode
-        except subprocess.CalledProcessError as e:
-            return e.returncode
+    success, message = clone_postgres_database(
+        source_path=source.path,
+        target_path=target.path,
+        on_output=on_output,
+    )
+
+    if success:
+        console.print()
+        console.print(Panel.fit('[bold green]Database Cloned Successfully![/bold green]', border_style='green'))
+        return 0
     else:
-        console.print('[red]Error: Database clone script not found[/red]')
+        console.print()
+        console.print(f'[red]Error: {message}[/red]')
         return 1
 
 
@@ -763,12 +764,12 @@ def sync_tasks_cmd() -> int:
             console.print(f'  [dim]Exists:[/dim] {task.title}')
 
     console.print()
-    console.print(Panel.fit(
-        f'[bold green]Sync Complete![/bold green]\n\n'
-        f'Created: {created_count}\n'
-        f'Updated: {updated_count}',
-        border_style='green',
-    ))
+    console.print(
+        Panel.fit(
+            f'[bold green]Sync Complete![/bold green]\n\nCreated: {created_count}\nUpdated: {updated_count}',
+            border_style='green',
+        )
+    )
     console.print()
 
     return 0
@@ -1021,7 +1022,7 @@ def cleanup_tasks_cmd(dry_run: bool = False, auto_commit: bool = False) -> int:
     console.print(Panel.fit('[bold]Cleanup Orphaned Tasks[/bold]', border_style='yellow'))
     console.print()
 
-    from .sync import cleanup_orphaned_tasks, auto_commit_tasks
+    from .sync import auto_commit_tasks, cleanup_orphaned_tasks
 
     # First, do a dry run to see what would be removed
     result = cleanup_orphaned_tasks(dry_run=True)
@@ -1050,6 +1051,7 @@ def cleanup_tasks_cmd(dry_run: bool = False, auto_commit: bool = False) -> int:
 
     # Confirm before deleting (unless -y flag was passed)
     from .cli import should_prompt
+
     if should_prompt():
         console.print('[red]These tasks will be removed from .worktree-tasks.json[/red]')
         console.print()

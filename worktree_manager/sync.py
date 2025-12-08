@@ -6,12 +6,12 @@ Provides bidirectional sync for multi-system task tracking:
 - SQLite database (tasks.db) is the local cache for fast web UI queries
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import NamedTuple
 
 from .task_store import (
-    Task,
+    TASK_FILE_NAME,
     TaskStatus,
     ensure_db,
     find_repo_root,
@@ -20,7 +20,6 @@ from .task_store import (
     save_task,
     tasks,
     write_tasks,
-    TASK_FILE_NAME,
 )
 
 
@@ -46,14 +45,14 @@ class Conflict(NamedTuple):
 def _parse_timestamp(ts_str: str | None) -> datetime:
     """Parse an ISO timestamp string to datetime."""
     if not ts_str:
-        return datetime(1970, 1, 1, tzinfo=timezone.utc)
+        return datetime(1970, 1, 1, tzinfo=UTC)
     try:
         dt = datetime.fromisoformat(ts_str.replace('Z', '+00:00'))
         if dt.tzinfo is None:
-            dt = dt.replace(tzinfo=timezone.utc)
+            dt = dt.replace(tzinfo=UTC)
         return dt
     except (ValueError, AttributeError):
-        return datetime(1970, 1, 1, tzinfo=timezone.utc)
+        return datetime(1970, 1, 1, tzinfo=UTC)
 
 
 def sync_json_to_sqlite(repo_root: Path | str | None = None) -> SyncResult:
@@ -103,7 +102,7 @@ def sync_json_to_sqlite(repo_root: Path | str | None = None) -> SyncResult:
                 json_updated = _parse_timestamp(data.get('updated_at'))
                 db_updated = existing_task.updated_at
                 if db_updated.tzinfo is None:
-                    db_updated = db_updated.replace(tzinfo=timezone.utc)
+                    db_updated = db_updated.replace(tzinfo=UTC)
 
                 if json_updated > db_updated:
                     # Update from JSON
@@ -160,7 +159,7 @@ def sync_sqlite_to_json(repo_root: Path | str | None = None) -> SyncResult:
 
                 db_updated = task.updated_at
                 if db_updated.tzinfo is None:
-                    db_updated = db_updated.replace(tzinfo=timezone.utc)
+                    db_updated = db_updated.replace(tzinfo=UTC)
 
                 if db_updated > existing_updated:
                     store['tasks'][task.feature_name] = task_data
@@ -233,7 +232,7 @@ def full_sync(repo_root: Path | str | None = None) -> dict:
 
             db_updated = task.updated_at
             if db_updated.tzinfo is None:
-                db_updated = db_updated.replace(tzinfo=timezone.utc)
+                db_updated = db_updated.replace(tzinfo=UTC)
 
             if db_updated > json_updated:
                 merged_tasks[task.feature_name] = (db_data, 'sqlite')
@@ -365,37 +364,40 @@ def detect_conflicts(repo_root: Path | str | None = None) -> list[Conflict]:
 
         db_updated = task.updated_at
         if db_updated.tzinfo is None:
-            db_updated = db_updated.replace(tzinfo=timezone.utc)
+            db_updated = db_updated.replace(tzinfo=UTC)
 
         # Check if both have been modified since last sync
         if task.last_synced_at:
             last_sync = task.last_synced_at
             if last_sync.tzinfo is None:
-                last_sync = last_sync.replace(tzinfo=timezone.utc)
+                last_sync = last_sync.replace(tzinfo=UTC)
 
             json_modified_since_sync = json_updated > last_sync
             sqlite_modified_since_sync = db_updated > last_sync
 
             # Conflict if both modified and have different values
-            if (json_modified_since_sync and sqlite_modified_since_sync and
-                    task.status != json_data.get('status')):
-                conflicts.append(Conflict(
-                    feature_name=task.feature_name,
-                    json_data=json_data,
-                    sqlite_status=task.status,
-                    sqlite_updated_at=db_updated,
-                    json_updated_at=json_updated,
-                ))
+            if json_modified_since_sync and sqlite_modified_since_sync and task.status != json_data.get('status'):
+                conflicts.append(
+                    Conflict(
+                        feature_name=task.feature_name,
+                        json_data=json_data,
+                        sqlite_status=task.status,
+                        sqlite_updated_at=db_updated,
+                        json_updated_at=json_updated,
+                    )
+                )
         else:
             # No last_synced_at means never synced - check if different
             if task.status != json_data.get('status'):
-                conflicts.append(Conflict(
-                    feature_name=task.feature_name,
-                    json_data=json_data,
-                    sqlite_status=task.status,
-                    sqlite_updated_at=db_updated,
-                    json_updated_at=json_updated,
-                ))
+                conflicts.append(
+                    Conflict(
+                        feature_name=task.feature_name,
+                        json_data=json_data,
+                        sqlite_status=task.status,
+                        sqlite_updated_at=db_updated,
+                        json_updated_at=json_updated,
+                    )
+                )
 
     return conflicts
 
@@ -430,7 +432,7 @@ def resolve_conflict(
         return False
 
     json_data = store['tasks'][feature_name]
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
 
     if use_json:
         # Update SQLite from JSON
@@ -473,7 +475,7 @@ def mark_synced(feature_name: str) -> bool:
     if not task:
         return False
 
-    task.last_synced_at = datetime.now(timezone.utc)
+    task.last_synced_at = datetime.now(UTC)
     save_task(task)
     return True
 
@@ -500,8 +502,8 @@ def cleanup_orphaned_tasks(repo_root: Path | str | None = None, dry_run: bool = 
         - kept: list of feature names that were kept
         - errors: list of error messages
     """
+    from .git_ops import get_main_repo_root, list_worktrees
     from .registry import read_registry
-    from .git_ops import list_worktrees, get_main_repo_root
 
     ensure_db()
 
@@ -539,7 +541,7 @@ def cleanup_orphaned_tasks(repo_root: Path | str | None = None, dry_run: bool = 
             branch = wt.branch
             for prefix in ('feature/', 'bugfix/', 'chore/', 'hotfix/'):
                 if branch.startswith(prefix):
-                    branch = branch[len(prefix):]
+                    branch = branch[len(prefix) :]
                     break
             git_worktree_branches.add(branch)
     except Exception as e:
@@ -612,7 +614,7 @@ def get_sync_status(repo_root: Path | str | None = None) -> dict:
     if task_file and task_file.exists():
         last_json_modified = datetime.fromtimestamp(
             task_file.stat().st_mtime,
-            tz=timezone.utc,
+            tz=UTC,
         )
 
     return {

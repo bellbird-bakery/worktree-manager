@@ -12,9 +12,8 @@ import subprocess
 from rich.console import Console
 from rich.prompt import Confirm, Prompt
 
-from ..git_ops import commit_all, has_uncommitted_changes
-from . import HookResult, TransitionContext
 from ..task_store import TaskStatus
+from . import HookResult, TransitionContext
 
 logger = logging.getLogger('worktree_manager.hooks')
 console = Console()
@@ -103,9 +102,7 @@ class GitCommitHook:
         from worktree_manager.hooks.config import HookConfig
 
         config = HookConfig.load()
-        default_message = config.get_hook_setting(
-            'git_commit', 'default_message', 'Complete {feature_name}'
-        )
+        default_message = config.get_hook_setting('git_commit', 'default_message', 'Complete {feature_name}')
         default_message = default_message.format(feature_name=ctx.task.feature_name)
 
         return HookResult(
@@ -158,9 +155,7 @@ class GitCommitHook:
         from worktree_manager.hooks.config import HookConfig
 
         config = HookConfig.load()
-        default_message = config.get_hook_setting(
-            'git_commit', 'default_message', 'Complete {feature_name}'
-        )
+        default_message = config.get_hook_setting('git_commit', 'default_message', 'Complete {feature_name}')
         default_message = default_message.format(feature_name=ctx.task.feature_name)
 
         if ctx.interactive:
@@ -170,9 +165,7 @@ class GitCommitHook:
             # Webapp mode: check if user confirmed via modal
             return self._execute_from_confirmation(ctx, worktree_str, default_message)
 
-    def _execute_interactive(
-        self, ctx: TransitionContext, worktree_str: str, default_message: str
-    ) -> HookResult:
+    def _execute_interactive(self, ctx: TransitionContext, worktree_str: str, default_message: str) -> HookResult:
         """Execute in interactive CLI mode with prompts."""
         console.print('\n[bold yellow]Uncommitted changes detected:[/bold yellow]')
 
@@ -216,9 +209,7 @@ class GitCommitHook:
                 message=f'Git commit failed: {e}',
             )
 
-    def _execute_from_confirmation(
-        self, ctx: TransitionContext, worktree_str: str, default_message: str
-    ) -> HookResult:
+    def _execute_from_confirmation(self, ctx: TransitionContext, worktree_str: str, default_message: str) -> HookResult:
         """Execute using confirmation data from webapp modal."""
         if not ctx.user_confirmed:
             # User didn't confirm (e.g., clicked skip in modal)

@@ -25,11 +25,13 @@ def run_setup_wizard() -> bool:
         True if setup completed successfully, False if cancelled.
     """
     console.print()
-    console.print(Panel.fit(
-        '[bold blue]Welcome to Worktree Manager Setup[/bold blue]\n\n'
-        'This wizard will help you configure the tool for first use.',
-        border_style='blue',
-    ))
+    console.print(
+        Panel.fit(
+            '[bold blue]Welcome to Worktree Manager Setup[/bold blue]\n\n'
+            'This wizard will help you configure the tool for first use.',
+            border_style='blue',
+        )
+    )
     console.print()
 
     config = get_config()

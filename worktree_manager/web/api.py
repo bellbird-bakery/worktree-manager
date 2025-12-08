@@ -11,8 +11,8 @@ import logging
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 
-from ..task_store import Task, TaskStatus, tasks, save_task
 from ..registry import read_registry
+from ..task_store import TaskStatus, save_task, tasks
 
 logger = logging.getLogger('worktree_manager')
 
@@ -27,20 +27,24 @@ async def sync_tasks(request: Request) -> JSONResponse:
     try:
         registry = read_registry()
     except FileNotFoundError:
-        return JSONResponse({
-            'success': False,
-            'error': 'Registry file not found',
-            'created': 0,
-            'updated': 0,
-        })
+        return JSONResponse(
+            {
+                'success': False,
+                'error': 'Registry file not found',
+                'created': 0,
+                'updated': 0,
+            }
+        )
 
     if registry is None:
-        return JSONResponse({
-            'success': False,
-            'error': 'No registry found',
-            'created': 0,
-            'updated': 0,
-        })
+        return JSONResponse(
+            {
+                'success': False,
+                'error': 'No registry found',
+                'created': 0,
+                'updated': 0,
+            }
+        )
 
     created_count = 0
     updated_count = 0
@@ -65,32 +69,36 @@ async def sync_tasks(request: Request) -> JSONResponse:
             tasks.update(task, worktree_path=worktree.path)
             updated_count += 1
 
-    return JSONResponse({
-        'success': True,
-        'created': created_count,
-        'updated': updated_count,
-        'total_worktrees': len(registry_features),
-    })
+    return JSONResponse(
+        {
+            'success': True,
+            'created': created_count,
+            'updated': updated_count,
+            'total_worktrees': len(registry_features),
+        }
+    )
 
 
 async def list_tasks(request: Request) -> JSONResponse:
     """List all tasks."""
     all_tasks = tasks.all()
-    return JSONResponse({
-        'tasks': [
-            {
-                'id': t.id,
-                'feature_name': t.feature_name,
-                'title': t.title,
-                'status': t.status,
-                'status_display': t.status_display,
-                'worktree_path': t.worktree_path,
-                'priority': t.priority,
-                'updated_at': t.updated_at.isoformat(),
-            }
-            for t in all_tasks
-        ]
-    })
+    return JSONResponse(
+        {
+            'tasks': [
+                {
+                    'id': t.id,
+                    'feature_name': t.feature_name,
+                    'title': t.title,
+                    'status': t.status,
+                    'status_display': t.status_display,
+                    'worktree_path': t.worktree_path,
+                    'priority': t.priority,
+                    'updated_at': t.updated_at.isoformat(),
+                }
+                for t in all_tasks
+            ]
+        }
+    )
 
 
 async def get_task(request: Request) -> JSONResponse:
@@ -101,19 +109,21 @@ async def get_task(request: Request) -> JSONResponse:
     if not task:
         return JSONResponse({'error': 'Task not found'}, status_code=404)
 
-    return JSONResponse({
-        'id': task.id,
-        'feature_name': task.feature_name,
-        'title': task.title,
-        'description': task.description,
-        'status': task.status,
-        'status_display': task.status_display,
-        'worktree_path': task.worktree_path,
-        'priority': task.priority,
-        'notes': task.notes,
-        'created_at': task.created_at.isoformat(),
-        'updated_at': task.updated_at.isoformat(),
-    })
+    return JSONResponse(
+        {
+            'id': task.id,
+            'feature_name': task.feature_name,
+            'title': task.title,
+            'description': task.description,
+            'status': task.status,
+            'status_display': task.status_display,
+            'worktree_path': task.worktree_path,
+            'priority': task.priority,
+            'notes': task.notes,
+            'created_at': task.created_at.isoformat(),
+            'updated_at': task.updated_at.isoformat(),
+        }
+    )
 
 
 async def update_task_status(request: Request) -> JSONResponse:
@@ -151,11 +161,14 @@ async def update_task_status(request: Request) -> JSONResponse:
     # Sync to JSON
     try:
         from ..sync import sync_sqlite_to_json
+
         sync_sqlite_to_json()
     except Exception as e:
         logger.warning(f'JSON sync failed: {e}')
 
-    return JSONResponse({
-        'success': True,
-        'message': f'Task moved from {old_status} to {new_status}',
-    })
+    return JSONResponse(
+        {
+            'success': True,
+            'message': f'Task moved from {old_status} to {new_status}',
+        }
+    )

@@ -12,7 +12,6 @@ from __future__ import annotations
 import json
 import logging
 import os
-import time
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -20,7 +19,8 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 try:
-    from filelock import FileLock, Timeout as FileLockTimeout
+    from filelock import FileLock
+    from filelock import Timeout as FileLockTimeout
 except ImportError:
     # Fallback to fcntl for backwards compatibility
     FileLock = None
