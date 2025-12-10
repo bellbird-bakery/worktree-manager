@@ -81,12 +81,29 @@ def main() -> int:
     close_parser = subparsers.add_parser('close', help='Close a worktree')
     close_parser.add_argument('message', help='Commit message')
 
-    # clone-db command
-    clone_parser = subparsers.add_parser('clone-db', help='Clone database from another worktree')
-    clone_parser.add_argument('source_index', type=int, help='Source worktree index')
-
     # cleanup-orphans command
     subparsers.add_parser('cleanup-orphans', help='Clean up orphaned resources')
+
+    # prune command
+    subparsers.add_parser('prune', help='Remove worktrees from registry that no longer exist on disk')
+
+    # load-db command
+    load_db_parser = subparsers.add_parser('load-db', help='Load production database into worktree')
+    load_db_parser.add_argument(
+        'feature_name',
+        nargs='?',
+        help='Target worktree feature name (default: current directory)',
+    )
+    load_db_parser.add_argument(
+        '--skip-dump',
+        action='store_true',
+        help='Use cached production dump instead of fetching fresh',
+    )
+    load_db_parser.add_argument(
+        '--skip-backup',
+        action='store_true',
+        help='Skip backing up current local database',
+    )
 
     # update-last-accessed command
     subparsers.add_parser('update-last-accessed', help='Update last accessed timestamp')
@@ -180,10 +197,16 @@ def main() -> int:
             return commands.show_status()
         elif args.command == 'close':
             return commands.close_worktree(args.message)
-        elif args.command == 'clone-db':
-            return commands.clone_database(args.source_index)
         elif args.command == 'cleanup-orphans':
             return commands.cleanup_orphans()
+        elif args.command == 'prune':
+            return commands.prune_missing_worktrees()
+        elif args.command == 'load-db':
+            return commands.load_db_cmd(
+                feature_name=args.feature_name,
+                skip_dump=args.skip_dump,
+                skip_backup=args.skip_backup,
+            )
         elif args.command == 'update-last-accessed':
             return commands.update_last_accessed()
         elif args.command == 'web':

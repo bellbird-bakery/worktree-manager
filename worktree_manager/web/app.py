@@ -194,21 +194,13 @@ def create_app() -> Starlette:
         Route('/conflicts/', routes.conflict_list, name='conflict_list'),
         Route('/conflicts/{feature_name}/', routes.conflict_detail, name='conflict_detail'),
         Route('/conflicts/{feature_name}/resolve/', routes.conflict_resolve, methods=['POST'], name='conflict_resolve'),
-        # Database cloning
-        Route('/worktrees/{target_feature}/clone-db/', routes.clone_db_form, name='clone_db_form'),
+        # Load database from production dump
+        Route('/worktrees/{target_feature}/load-db/', routes.load_db_form, name='load_db_form'),
         Route(
-            '/worktrees/{target_feature}/clone-db/run/',
-            routes.clone_db_action,
+            '/worktrees/{target_feature}/load-db/run/',
+            routes.load_db_action,
             methods=['POST'],
-            name='clone_db_action',
-        ),
-        # Production database restore
-        Route('/worktrees/{target_feature}/restore-prod/', routes.restore_prod_form, name='restore_prod_form'),
-        Route(
-            '/worktrees/{target_feature}/restore-prod/run/',
-            routes.restore_prod_action,
-            methods=['POST'],
-            name='restore_prod_action',
+            name='load_db_action',
         ),
         # API routes
         Route('/api/sync/', api.sync_tasks, methods=['POST'], name='api_sync'),

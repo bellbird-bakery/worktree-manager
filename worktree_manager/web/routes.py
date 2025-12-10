@@ -14,7 +14,7 @@ from pathlib import Path
 from starlette.requests import Request
 from starlette.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 
-from ..docker_ops import clone_postgres_database, compose_down, fix_permissions, is_docker_running
+from ..docker_ops import compose_down, fix_permissions, is_docker_running
 from ..git_ops import (
     get_main_repo_root,
     has_uncommitted_changes_in_path,
@@ -719,142 +719,8 @@ async def conflict_resolve(request: Request) -> Response:
 
 
 # ==============================================================================
-# Database Cloning Routes
+# Load Database Routes
 # ==============================================================================
-
-
-async def clone_db_form(request: Request) -> Response:
-    """Show form for cloning database to a worktree."""
-    templates = get_templates(request)
-    target_feature = request.path_params['target_feature']
-
-    registry = read_registry()
-    if not registry:
-        return JSONResponse({'error': 'No registry found'}, status_code=400)
-
-    target = registry.find_by_feature(target_feature)
-    if not target:
-        return JSONResponse({'error': f'Worktree "{target_feature}" not found'}, status_code=404)
-
-    sources = []
-
-    # Add main repo as source option
-    main_repo_path = Path(registry.main_repo_path)
-    if main_repo_path.exists():
-        compose_file = main_repo_path / 'docker-compose.local.yml'
-        if not compose_file.exists():
-            compose_file = main_repo_path / 'docker-compose.yml'
-        if compose_file.exists():
-            sources.append(
-                {
-                    'index': 0,
-                    'feature_name': 'develop (main repo)',
-                    'path': str(main_repo_path),
-                    'is_main': True,
-                }
-            )
-
-    # Add other worktrees
-    for wt in registry.worktrees:
-        if wt.feature_name != target_feature and Path(wt.path).exists():
-            sources.append(
-                {
-                    'index': wt.index,
-                    'feature_name': wt.feature_name,
-                    'path': wt.path,
-                    'is_main': False,
-                }
-            )
-
-    sources.sort(key=lambda x: x['index'])
-
-    return templates.TemplateResponse(
-        request,
-        'clone_db.html',
-        {
-            'target': {
-                'index': target.index,
-                'feature_name': target.feature_name,
-                'path': target.path,
-            },
-            'sources': sources,
-            'docker_running': is_docker_running(),
-        },
-    )
-
-
-async def clone_db_action(request: Request) -> Response:
-    """Execute database cloning."""
-    target_feature = request.path_params['target_feature']
-    form = await request.form()
-    source_index = form.get('source_index')
-
-    if source_index is None or source_index == '':
-        return JSONResponse({'error': 'Source index required'}, status_code=400)
-
-    try:
-        source_index = int(source_index)
-    except ValueError:
-        return JSONResponse({'error': 'Invalid source index'}, status_code=400)
-
-    registry = read_registry()
-    if not registry:
-        return JSONResponse({'error': 'No registry found'}, status_code=400)
-
-    target = registry.find_by_feature(target_feature)
-    if not target:
-        return JSONResponse({'error': f'Target worktree "{target_feature}" not found'}, status_code=404)
-
-    # Find source
-    if source_index == 0:
-        source_path = registry.main_repo_path
-        source_name = 'develop (main repo)'
-    else:
-        source = registry.find_by_index(source_index)
-        if not source:
-            return JSONResponse({'error': f'Source worktree #{source_index} not found'}, status_code=404)
-        source_path = source.path
-        source_name = source.feature_name
-
-    # Clone database using Python function
-    # Run in thread executor since clone_postgres_database uses blocking subprocess calls
-    output_lines: list[str] = []
-
-    def collect_output(line: str) -> None:
-        output_lines.append(line)
-
-    try:
-        success, message = await asyncio.to_thread(
-            clone_postgres_database,
-            source_path=source_path,
-            target_path=target.path,
-            on_output=collect_output,
-        )
-
-        output = '\n'.join(output_lines)
-
-        if success:
-            return JSONResponse(
-                {
-                    'success': True,
-                    'message': f'Database cloned from {source_name} to {target.feature_name}',
-                    'output': output,
-                }
-            )
-        else:
-            return JSONResponse(
-                {
-                    'success': False,
-                    'error': message,
-                    'output': output,
-                },
-                status_code=500,
-            )
-
-    except Exception as e:
-        logger.error(f'Clone failed: {e}')
-        return JSONResponse({'success': False, 'error': str(e)}, status_code=500)
-
 
 # Production restore script path and dumps directory
 PROD_RESTORE_SCRIPT = Path('/home/jeremy/projects/dispatch-guru/database_tools/update_local_restore.sh')
@@ -887,8 +753,8 @@ def get_latest_prod_dump() -> dict | None:
     }
 
 
-async def restore_prod_form(request: Request) -> Response:
-    """Display production database restore form."""
+async def load_db_form(request: Request) -> Response:
+    """Display database load form."""
     templates = get_templates(request)
     target_feature = request.path_params['target_feature']
 
@@ -908,7 +774,7 @@ async def restore_prod_form(request: Request) -> Response:
 
     return templates.TemplateResponse(
         request,
-        'restore_prod.html',
+        'load_db.html',
         {
             'target': target,
             'script_exists': script_exists,
@@ -919,8 +785,8 @@ async def restore_prod_form(request: Request) -> Response:
     )
 
 
-async def restore_prod_action(request: Request) -> Response:
-    """Execute production database restore."""
+async def load_db_action(request: Request) -> Response:
+    """Execute database load from production dump."""
     target_feature = request.path_params['target_feature']
     form = await request.form()
 
@@ -934,7 +800,7 @@ async def restore_prod_action(request: Request) -> Response:
 
     if not PROD_RESTORE_SCRIPT.exists():
         return JSONResponse(
-            {'error': f'Production restore script not found at {PROD_RESTORE_SCRIPT}'},
+            {'error': f'Database load script not found at {PROD_RESTORE_SCRIPT}'},
             status_code=500,
         )
 
@@ -968,7 +834,7 @@ async def restore_prod_action(request: Request) -> Response:
             return JSONResponse(
                 {
                     'success': True,
-                    'message': f'Production database restored to {target.feature_name}',
+                    'message': f'Database loaded to {target.feature_name}',
                     'output': result.stdout,
                 }
             )
@@ -976,7 +842,7 @@ async def restore_prod_action(request: Request) -> Response:
             return JSONResponse(
                 {
                     'success': False,
-                    'error': 'Restore failed',
+                    'error': 'Load failed',
                     'output': result.stdout + result.stderr,
                 },
                 status_code=500,
@@ -984,9 +850,9 @@ async def restore_prod_action(request: Request) -> Response:
 
     except subprocess.TimeoutExpired:
         return JSONResponse(
-            {'success': False, 'error': 'Restore timed out after 10 minutes'},
+            {'success': False, 'error': 'Load timed out after 10 minutes'},
             status_code=500,
         )
     except Exception as e:
-        logger.error(f'Production restore failed: {e}')
+        logger.error(f'Database load failed: {e}')
         return JSONResponse({'success': False, 'error': str(e)}, status_code=500)

@@ -21,7 +21,6 @@ from rich.table import Table
 
 from .docker_ops import (
     DockerError,
-    clone_postgres_database,
     compose_down,
     compose_ps,
     fix_permissions,
@@ -426,78 +425,6 @@ def close_worktree(message: str) -> int:
     console.print()
 
     return 0
-
-
-def clone_database(source_index: int) -> int:
-    """
-    Clone database from another worktree.
-
-    Args:
-        source_index: Index of the source worktree.
-
-    Returns:
-        Exit code (0 for success).
-    """
-    console.print()
-    console.print(Panel.fit('[bold]Database Cloning[/bold]', border_style='blue'))
-    console.print()
-
-    try:
-        repo_root = get_repo_root()
-    except GitError:
-        console.print('[red]Error: Not in a git repository[/red]')
-        return 1
-
-    current_path = str(repo_root)
-
-    # Get registry
-    registry = read_registry()
-    if not registry:
-        console.print('[red]Error: No worktree registry found[/red]')
-        return 1
-
-    # Find source worktree
-    source = registry.find_by_index(source_index)
-    if not source:
-        console.print(f'[red]Error: No worktree found with index {source_index}[/red]')
-        console.print()
-        console.print('Available worktrees:')
-        for wt in registry.worktrees:
-            console.print(f'  [{wt.index}] {wt.feature_name} - {wt.path}')
-        return 1
-
-    # Find current worktree
-    target = registry.find_by_path(current_path)
-    if not target:
-        console.print('[red]Error: Current directory is not a registered worktree[/red]')
-        return 1
-
-    if source.path == current_path:
-        console.print('[red]Error: Cannot clone from self[/red]')
-        return 1
-
-    console.print(f'Source: [cyan]{source.feature_name}[/cyan] (index {source.index})')
-    console.print(f'Target: [cyan]{target.feature_name}[/cyan] (index {target.index})')
-    console.print()
-
-    # Clone using Python function
-    def on_output(line: str) -> None:
-        console.print(f'  {line}')
-
-    success, message = clone_postgres_database(
-        source_path=source.path,
-        target_path=target.path,
-        on_output=on_output,
-    )
-
-    if success:
-        console.print()
-        console.print(Panel.fit('[bold green]Database Cloned Successfully![/bold green]', border_style='green'))
-        return 0
-    else:
-        console.print()
-        console.print(f'[red]Error: {message}[/red]')
-        return 1
 
 
 def cleanup_orphans() -> int:
@@ -1186,4 +1113,198 @@ def init_cmd(from_legacy: bool = False) -> int:
     console.print('[dim]Edit .worktree-manager.json to customize settings.[/dim]')
     console.print()
 
+    return 0
+
+
+# Path to production restore script
+PROD_RESTORE_SCRIPT = Path('/home/jeremy/projects/dispatch-guru/database_tools/update_local_restore.sh')
+
+
+def load_db_cmd(
+    feature_name: str | None = None,
+    skip_dump: bool = False,
+    skip_backup: bool = False,
+) -> int:
+    """
+    Load production database into a worktree.
+
+    Args:
+        feature_name: Target worktree feature name. If None, uses current directory.
+        skip_dump: Use cached production dump instead of fetching fresh.
+        skip_backup: Skip backing up current local database.
+
+    Returns:
+        Exit code (0 for success).
+    """
+    from .cli import should_prompt
+
+    console.print()
+    console.print(Panel.fit('[bold]Load Database[/bold]', border_style='blue'))
+    console.print()
+
+    # Get registry
+    registry = read_registry()
+    if not registry:
+        console.print('[red]Error: No worktree registry found[/red]')
+        return 1
+
+    # Find target worktree
+    if feature_name:
+        target = registry.find_by_feature(feature_name)
+        if not target:
+            console.print(f'[red]Error: Worktree "{feature_name}" not found in registry[/red]')
+            return 1
+    else:
+        # Use current directory
+        try:
+            current_path = str(get_repo_root())
+        except GitError:
+            console.print('[red]Error: Not in a git repository[/red]')
+            return 1
+
+        target = registry.find_by_path(current_path)
+        if not target:
+            console.print('[red]Error: Current directory is not a registered worktree[/red]')
+            return 1
+
+    console.print(f'Target: [cyan]{target.feature_name}[/cyan] (port {target.ports.db})')
+    console.print(f'Path: [dim]{target.path}[/dim]')
+    console.print()
+
+    # Check prerequisites
+    if not is_docker_running():
+        console.print('[red]Error: Docker is not running[/red]')
+        return 1
+
+    if not PROD_RESTORE_SCRIPT.exists():
+        console.print(f'[red]Error: Restore script not found at {PROD_RESTORE_SCRIPT}[/red]')
+        return 1
+
+    # Build flags
+    flags = []
+    if skip_dump:
+        flags.append('--skip-dump')
+        console.print('[dim]Using cached production dump[/dim]')
+    if skip_backup:
+        flags.append('--skip-local-backup')
+        console.print('[dim]Skipping local database backup[/dim]')
+
+    # Confirm
+    if should_prompt():
+        console.print()
+        console.print('[yellow]Warning: This will DROP the target database and replace it with production data![/yellow]')
+        response = input('Continue? (y/N): ')
+        if response.lower() != 'y':
+            console.print('Cancelled.')
+            return 0
+
+    console.print()
+    console.print('Loading database...')
+    console.print()
+
+    # Build environment
+    env = os.environ.copy()
+    env['DG_PATH'] = target.path
+    env['LOCAL_DB_PORT'] = str(target.ports.db)
+
+    # Run script
+    try:
+        result = subprocess.run(
+            [str(PROD_RESTORE_SCRIPT)] + flags,
+            env=env,
+            cwd=PROD_RESTORE_SCRIPT.parent,
+            input='y\n',  # Auto-confirm the script's prompt
+            capture_output=False,  # Stream output directly
+            text=True,
+            timeout=600,  # 10 minutes
+        )
+
+        if result.returncode == 0:
+            console.print()
+            console.print(Panel.fit('[bold green]Database Loaded Successfully![/bold green]', border_style='green'))
+            return 0
+        else:
+            console.print()
+            console.print('[red]Database load failed[/red]')
+            return 1
+
+    except subprocess.TimeoutExpired:
+        console.print('[red]Error: Database load timed out after 10 minutes[/red]')
+        return 1
+    except Exception as e:
+        console.print(f'[red]Error: {e}[/red]')
+        return 1
+
+
+def prune_missing_worktrees() -> int:
+    """
+    Remove worktrees from registry that no longer exist on disk.
+
+    Returns:
+        Exit code (0 for success).
+    """
+    from .cli import should_prompt
+
+    console.print()
+    console.print(Panel.fit('[bold]Prune Missing Worktrees[/bold]', border_style='blue'))
+    console.print()
+
+    # Get registry
+    registry = read_registry()
+    if not registry:
+        console.print('[red]Error: No worktree registry found[/red]')
+        return 1
+
+    # Find missing worktrees
+    missing = []
+    for entry in registry.worktrees:
+        if not Path(entry.path).exists():
+            missing.append(entry)
+
+    if not missing:
+        console.print('[green]No missing worktrees found. Registry is clean.[/green]')
+        return 0
+
+    # Show what will be removed
+    console.print(f'Found [yellow]{len(missing)}[/yellow] worktree(s) that no longer exist on disk:')
+    console.print()
+
+    table = Table(show_header=True)
+    table.add_column('#', style='dim')
+    table.add_column('Feature')
+    table.add_column('Path')
+    table.add_column('Ports')
+
+    for entry in missing:
+        table.add_row(
+            str(entry.index),
+            entry.feature_name,
+            entry.path,
+            f'web:{entry.ports.web} db:{entry.ports.db}',
+        )
+
+    console.print(table)
+    console.print()
+
+    # Confirm
+    if should_prompt():
+        response = input(f'Remove {len(missing)} entries from registry? (y/N): ')
+        if response.lower() != 'y':
+            console.print('Cancelled.')
+            return 0
+
+    # Remove from registry
+    with locked_registry() as reg:
+        if reg is None:
+            console.print('[red]Error: Could not lock registry[/red]')
+            return 1
+
+        removed = 0
+        for entry in missing:
+            # Find and remove by path
+            reg.worktrees = [wt for wt in reg.worktrees if wt.path != entry.path]
+            removed += 1
+
+    console.print()
+    console.print(f'[green]Removed {removed} entries from registry.[/green]')
     return 0

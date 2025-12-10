@@ -79,11 +79,8 @@
                 <a href="http://localhost:{{ wt.web_port }}/" target="_blank" class="btn btn-sm btn-outline-primary">
                     <i class="bi bi-box-arrow-up-right me-1"></i>Open
                 </a>
-                <a href="/worktrees/{{ wt.feature_name }}/clone-db/" class="btn btn-sm btn-outline-secondary">
-                    <i class="bi bi-database-add me-1"></i>Clone DB
-                </a>
-                <a href="/worktrees/{{ wt.feature_name }}/restore-prod/" class="btn btn-sm btn-outline-warning">
-                    <i class="bi bi-cloud-download me-1"></i>Prod DB
+                <a href="/worktrees/{{ wt.feature_name }}/load-db/" class="btn btn-sm btn-outline-secondary">
+                    <i class="bi bi-database-add me-1"></i>Load DB
                 </a>
                 <button type="button" class="btn btn-sm btn-outline-danger"
                         onclick="closeWorktree('{{ wt.feature_name }}')"

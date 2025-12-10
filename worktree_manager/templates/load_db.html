@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 
-{% block title %}Restore Production - {{ target.feature_name }}{% endblock %}
+{% block title %}Load Database - {{ target.feature_name }}{% endblock %}
 
 {% block content %}
 <div class="row mb-4">
@@ -8,12 +8,12 @@
         <nav aria-label="breadcrumb">
             <ol class="breadcrumb">
                 <li class="breadcrumb-item"><a href="/worktrees/">Worktrees</a></li>
-                <li class="breadcrumb-item active">Restore from Production</li>
+                <li class="breadcrumb-item active">Load Database</li>
             </ol>
         </nav>
-        <h2><i class="bi bi-cloud-download me-2"></i>Restore from Production</h2>
+        <h2><i class="bi bi-database-add me-2"></i>Load Database</h2>
         <p class="text-muted">
-            Restore production database to <strong>{{ target.feature_name }}</strong>
+            Load production database into <strong>{{ target.feature_name }}</strong>
         </p>
     </div>
 </div>
@@ -21,14 +21,14 @@
 {% if not docker_running %}
 <div class="alert alert-danger">
     <i class="bi bi-exclamation-triangle me-2"></i>
-    <strong>Docker is not running!</strong> Database restore requires Docker to be running.
+    <strong>Docker is not running!</strong> Database load requires Docker to be running.
 </div>
 {% endif %}
 
 {% if not script_exists %}
 <div class="alert alert-danger">
     <i class="bi bi-exclamation-triangle me-2"></i>
-    <strong>Script not found!</strong> The production restore script was not found at:
+    <strong>Script not found!</strong> The database load script was not found at:
     <code>{{ script_path }}</code>
 </div>
 {% endif %}
@@ -37,10 +37,10 @@
     <div class="col-md-8">
         <div class="card">
             <div class="card-header">
-                <i class="bi bi-cloud-download me-2"></i>Restore Production Database
+                <i class="bi bi-database-add me-2"></i>Load Database
             </div>
             <div class="card-body">
-                <form id="restore-form">
+                <form id="load-form">
                     <div class="mb-3">
                         <label class="form-label">Target Worktree</label>
                         <div class="form-control bg-light">
@@ -56,7 +56,7 @@
                         <div class="form-check">
                             <input class="form-check-input" type="checkbox" id="skip_dump" name="skip_dump"{% if not latest_dump %} disabled{% endif %}>
                             <label class="form-check-label" for="skip_dump">
-                                <strong>Skip dump</strong> - Use cached production dump
+                                <strong>Use cached dump</strong> - Skip fetching new production data
                             </label>
                             {% if latest_dump %}
                             <div class="mt-1 ms-4">
@@ -95,33 +95,33 @@
                     </div>
 
                     <div class="d-flex gap-2">
-                        <button type="submit" class="btn btn-danger" id="restore-btn" {% if not docker_running or not script_exists %}disabled{% endif %}>
-                            <i class="bi bi-cloud-download me-1"></i>Restore from Production
+                        <button type="submit" class="btn btn-danger" id="load-btn" {% if not docker_running or not script_exists %}disabled{% endif %}>
+                            <i class="bi bi-database-add me-1"></i>Load Database
                         </button>
                         <a href="/worktrees/" class="btn btn-outline-secondary">Cancel</a>
                     </div>
                 </form>
 
                 <!-- Progress/Result area -->
-                <div id="restore-progress" class="mt-4 d-none">
+                <div id="load-progress" class="mt-4 d-none">
                     <div class="card bg-dark text-light">
                         <div class="card-header">
-                            <i class="bi bi-terminal me-2"></i>Restore Progress
+                            <i class="bi bi-terminal me-2"></i>Load Progress
                         </div>
                         <div class="card-body">
                             <div id="progress-spinner" class="text-center py-3">
                                 <div class="spinner-border text-primary" role="status">
-                                    <span class="visually-hidden">Restoring...</span>
+                                    <span class="visually-hidden">Loading...</span>
                                 </div>
-                                <p class="mt-2 mb-0">Restoring production database, please wait...</p>
+                                <p class="mt-2 mb-0">Loading database, please wait...</p>
                                 <small class="text-muted">This may take several minutes for large databases</small>
                             </div>
-                            <pre id="restore-output" class="mb-0 d-none" style="max-height: 400px; overflow-y: auto;"></pre>
+                            <pre id="load-output" class="mb-0 d-none" style="max-height: 400px; overflow-y: auto;"></pre>
                         </div>
                     </div>
                 </div>
 
-                <div id="restore-result" class="mt-4 d-none">
+                <div id="load-result" class="mt-4 d-none">
                 </div>
             </div>
         </div>
@@ -135,10 +135,10 @@
             <div class="card-body">
                 <ol class="mb-0">
                     <li class="mb-2">Backs up your local database (optional)</li>
-                    <li class="mb-2">Dumps production database</li>
+                    <li class="mb-2">Fetches production database dump (optional)</li>
                     <li class="mb-2">Stops the web container</li>
                     <li class="mb-2">Drops and recreates local database</li>
-                    <li class="mb-2">Restores production dump</li>
+                    <li class="mb-2">Loads production dump</li>
                     <li class="mb-0">Restarts the application</li>
                 </ol>
             </div>
@@ -173,19 +173,19 @@
 
 {% block extra_js %}
 <script>
-document.getElementById('restore-form')?.addEventListener('submit', async function(e) {
+document.getElementById('load-form')?.addEventListener('submit', async function(e) {
     e.preventDefault();
 
     const form = e.target;
-    const btn = document.getElementById('restore-btn');
-    const progress = document.getElementById('restore-progress');
+    const btn = document.getElementById('load-btn');
+    const progress = document.getElementById('load-progress');
     const spinner = document.getElementById('progress-spinner');
-    const output = document.getElementById('restore-output');
-    const result = document.getElementById('restore-result');
+    const output = document.getElementById('load-output');
+    const result = document.getElementById('load-result');
 
     // Disable form
     btn.disabled = true;
-    btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Restoring...';
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Loading...';
 
     // Show progress
     progress.classList.remove('d-none');
@@ -205,7 +205,7 @@ document.getElementById('restore-form')?.addEventListener('submit', async functi
             formData.append('skip_local_backup', '1');
         }
 
-        const response = await fetch('/worktrees/{{ target.feature_name }}/restore-prod/run/', {
+        const response = await fetch('/worktrees/{{ target.feature_name }}/load-db/run/', {
             method: 'POST',
             headers: {
                 'X-CSRFToken': csrfToken,
@@ -240,7 +240,7 @@ document.getElementById('restore-form')?.addEventListener('submit', async functi
             `;
             // Re-enable form on error
             btn.disabled = false;
-            btn.innerHTML = '<i class="bi bi-cloud-download me-1"></i>Retry Restore';
+            btn.innerHTML = '<i class="bi bi-database-add me-1"></i>Retry Load';
         }
 
     } catch (err) {
@@ -253,7 +253,7 @@ document.getElementById('restore-form')?.addEventListener('submit', async functi
             </div>
         `;
         btn.disabled = false;
-        btn.innerHTML = '<i class="bi bi-cloud-download me-1"></i>Retry Restore';
+        btn.innerHTML = '<i class="bi bi-database-add me-1"></i>Retry Load';
     }
 });
 </script>

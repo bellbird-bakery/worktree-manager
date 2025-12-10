@@ -117,6 +117,7 @@ This will:
 |--------|-------------|
 | `-y, --yes` | Skip all confirmation prompts |
 | `-q, --quiet` | Minimal output |
+| `-V, --version` | Show version and exit |
 | `--non-interactive` | Fail instead of prompting (for CI/CD) |
 
 ## Web Interface
@@ -341,6 +342,26 @@ uv run pytest
 # Format and lint
 uv run ruff format .
 uv run ruff check . --fix
+```
+
+### Just Commands
+
+The project includes a `justfile` for common development tasks:
+
+```bash
+just              # Show available commands
+just version      # Show current version
+just bump-patch   # Bump patch version and install (1.1.0 -> 1.1.1)
+just bump-minor   # Bump minor version and install (1.1.0 -> 1.2.0)
+just bump-major   # Bump major version and install (1.1.0 -> 2.0.0)
+just install      # Install without version bump
+just lint         # Run linter
+just fix          # Run linter with auto-fix
+just fmt          # Format code
+just test         # Run tests
+just check        # Run all checks (lint + test)
+just sync         # Sync dependencies
+just web          # Start web UI
 ```
 
 ## License
