@@ -8,8 +8,6 @@ This tool manages isolated Docker Compose environments for each git worktree,
 with automatic port allocation and database cloning capabilities.
 """
 
-__version__ = '1.0.0'
-
 # Base ports for worktrees (can be overridden in project config)
 BASE_WEB_PORT = 58000
 BASE_DB_PORT = 5432

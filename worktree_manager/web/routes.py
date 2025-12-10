@@ -6,6 +6,7 @@ Starlette-based routes replacing Django views.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import subprocess
 from pathlib import Path
@@ -816,13 +817,15 @@ async def clone_db_action(request: Request) -> Response:
         source_name = source.feature_name
 
     # Clone database using Python function
+    # Run in thread executor since clone_postgres_database uses blocking subprocess calls
     output_lines: list[str] = []
 
     def collect_output(line: str) -> None:
         output_lines.append(line)
 
     try:
-        success, message = clone_postgres_database(
+        success, message = await asyncio.to_thread(
+            clone_postgres_database,
             source_path=source_path,
             target_path=target.path,
             on_output=collect_output,
@@ -943,12 +946,15 @@ async def restore_prod_action(request: Request) -> Response:
         flags.append('--skip-local-backup')
 
     # Set up environment with DG_PATH pointing to target worktree
+    # Also pass LOCAL_DB_PORT to ensure restore uses correct worktree port
     env = subprocess.os.environ.copy()
     env['DG_PATH'] = target.path
+    env['LOCAL_DB_PORT'] = str(target.ports.db)
 
     try:
-        # Run from script's directory so $PWD/dumps resolves correctly in .env
-        result = subprocess.run(
+        # Run in thread executor since subprocess.run is blocking
+        result = await asyncio.to_thread(
+            subprocess.run,
             [str(PROD_RESTORE_SCRIPT)] + flags,
             env=env,
             cwd=PROD_RESTORE_SCRIPT.parent,

@@ -2,6 +2,9 @@
 
 import argparse
 import sys
+from importlib.metadata import version
+
+__version__ = version('worktree-manager')
 
 
 # Global flags storage
@@ -54,6 +57,12 @@ def main() -> int:
         '--quiet',
         action='store_true',
         help='Minimal output',
+    )
+    parser.add_argument(
+        '-V',
+        '--version',
+        action='version',
+        version=f'%(prog)s {__version__}',
     )
 
     subparsers = parser.add_subparsers(dest='command', help='Command to run')
