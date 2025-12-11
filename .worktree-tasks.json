@@ -20,6 +20,16 @@
       "updated_at": "2025-12-08T22:33:13.056937+00:00",
       "worktree_path": "/home/jeremy/projects/wt-django6"
     },
+    "onboarding-fix": {
+      "created_at": "2025-12-10T23:57:04.750327+00:00",
+      "description": "",
+      "notes": "",
+      "priority": 0,
+      "status": "todo",
+      "title": "Onboarding Fix",
+      "updated_at": "2025-12-10T23:57:04.750327+00:00",
+      "worktree_path": "/home/jeremy/projects/wt-onboarding-fix"
+    },
     "xero-customer-update": {
       "created_at": "2025-12-10T21:47:55.232725+00:00",
       "description": "",

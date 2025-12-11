@@ -23,6 +23,11 @@
             <a class="navbar-brand" href="/">
                 <i class="bi bi-kanban me-2"></i>Worktree Tasks
             </a>
+            {% if repo_info %}
+            <span class="navbar-text text-muted small">
+                <i class="bi bi-git me-1"></i>{{ repo_info.name }}
+            </span>
+            {% endif %}
             <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
                 <span class="navbar-toggler-icon"></span>
             </button>

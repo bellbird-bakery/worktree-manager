@@ -50,6 +50,21 @@ def get_templates(request: Request):
     return request.app.state.templates
 
 
+def get_current_repo_info() -> dict:
+    """Get info about the current main repository from the registry."""
+    try:
+        registry = read_registry()
+        if registry and registry.main_repo_path:
+            repo_path = Path(registry.main_repo_path)
+            return {
+                'path': str(repo_path),
+                'name': repo_path.name,
+            }
+    except Exception:
+        pass
+    return {'path': 'Unknown', 'name': 'Unknown'}
+
+
 # ==============================================================================
 # Kanban Board Routes
 # ==============================================================================
@@ -90,6 +105,7 @@ async def kanban_board(request: Request) -> Response:
             'in_progress_tasks': in_progress_tasks,
             'done_tasks': done_tasks,
             'total_count': total_count,
+            'repo_info': get_current_repo_info(),
         },
     )
 
@@ -322,6 +338,7 @@ async def worktree_list(request: Request) -> Response:
             'worktrees': worktree_data,
             'sync_status': sync_status,
             'conflict_count': len(sync_status['conflicts']),
+            'repo_info': get_current_repo_info(),
         },
     )
 
@@ -329,9 +346,10 @@ async def worktree_list(request: Request) -> Response:
 async def worktree_create(request: Request) -> Response:
     """Create a new worktree."""
     templates = get_templates(request)
+    repo_info = get_current_repo_info()
 
     if request.method == 'GET':
-        return templates.TemplateResponse(request, 'worktree_create.html', {})
+        return templates.TemplateResponse(request, 'worktree_create.html', {'repo_info': repo_info})
 
     form = await request.form()
     feature_name = form.get('feature_name', '').strip()
@@ -340,7 +358,7 @@ async def worktree_create(request: Request) -> Response:
         return templates.TemplateResponse(
             request,
             'worktree_create.html',
-            {'error': 'Feature name is required'},
+            {'error': 'Feature name is required', 'repo_info': repo_info},
         )
 
     # Validate feature name
@@ -349,7 +367,7 @@ async def worktree_create(request: Request) -> Response:
         return templates.TemplateResponse(
             request,
             'worktree_create.html',
-            {'error': error_msg, 'feature_name': feature_name},
+            {'error': error_msg, 'feature_name': feature_name, 'repo_info': repo_info},
         )
 
     # Check if already exists
@@ -364,6 +382,7 @@ async def worktree_create(request: Request) -> Response:
                     {
                         'error': f'Worktree for "{feature_name}" already exists',
                         'feature_name': feature_name,
+                        'repo_info': repo_info,
                     },
                 )
     except Exception:
@@ -383,6 +402,7 @@ async def worktree_create(request: Request) -> Response:
                 {
                     'error': 'Failed to create worktree. Check console for details.',
                     'feature_name': feature_name,
+                    'repo_info': repo_info,
                 },
             )
     except Exception as e:
@@ -390,7 +410,7 @@ async def worktree_create(request: Request) -> Response:
         return templates.TemplateResponse(
             request,
             'worktree_create.html',
-            {'error': str(e), 'feature_name': feature_name},
+            {'error': str(e), 'feature_name': feature_name, 'repo_info': repo_info},
         )
 
 
