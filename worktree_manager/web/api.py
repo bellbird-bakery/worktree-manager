@@ -158,14 +158,6 @@ async def update_task_status(request: Request) -> JSONResponse:
     task.status = new_status
     save_task(task)
 
-    # Sync to JSON
-    try:
-        from ..sync import sync_sqlite_to_json
-
-        sync_sqlite_to_json()
-    except Exception as e:
-        logger.warning(f'JSON sync failed: {e}')
-
     return JSONResponse(
         {
             'success': True,

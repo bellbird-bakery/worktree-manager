@@ -5,7 +5,7 @@ Provides:
 - Kanban board for task management
 - Worktree list and management
 - Database cloning interface
-- Sync status and conflict resolution
+- Load database from production dump
 """
 
 from __future__ import annotations
@@ -186,14 +186,6 @@ def create_app() -> Starlette:
         Route('/worktrees/create/', routes.worktree_create, methods=['GET', 'POST'], name='worktree_create'),
         Route('/worktrees/{feature_name}/status/', routes.worktree_status, name='worktree_status'),
         Route('/worktrees/{feature_name}/close/', routes.worktree_close, methods=['POST'], name='worktree_close'),
-        # Sync status and actions
-        Route('/sync/', routes.sync_status_view, name='sync_status'),
-        Route('/sync/pull/', routes.sync_pull, methods=['POST'], name='sync_pull'),
-        Route('/sync/push/', routes.sync_push, methods=['POST'], name='sync_push'),
-        # Conflict resolution
-        Route('/conflicts/', routes.conflict_list, name='conflict_list'),
-        Route('/conflicts/{feature_name}/', routes.conflict_detail, name='conflict_detail'),
-        Route('/conflicts/{feature_name}/resolve/', routes.conflict_resolve, methods=['POST'], name='conflict_resolve'),
         # Load database from production dump
         Route('/worktrees/{target_feature}/load-db/', routes.load_db_form, name='load_db_form'),
         Route(
@@ -225,16 +217,6 @@ def create_app() -> Starlette:
 def run_server(host: str = '127.0.0.1', port: int = 8000) -> None:
     """Run the web server using uvicorn."""
     import uvicorn
-
-    # Sync from JSON on startup
-    try:
-        from ..sync import sync_json_to_sqlite
-
-        result = sync_json_to_sqlite()
-        if result.created or result.updated:
-            logger.info(f'Synced from JSON: {result.created} created, {result.updated} updated')
-    except Exception as e:
-        logger.warning(f'JSON sync on startup failed: {e}')
 
     logger.info(f'Starting web server at http://{host}:{port}')
     uvicorn.run(

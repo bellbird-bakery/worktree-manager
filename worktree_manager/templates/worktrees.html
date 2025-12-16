@@ -17,15 +17,6 @@
     </div>
 </div>
 
-{% if sync_status.conflicts %}
-<div class="alert alert-warning">
-    <i class="bi bi-exclamation-triangle me-2"></i>
-    <strong>{{ sync_status.conflicts|length }} conflict{{ sync_status.conflicts|length|pluralize }}</strong>
-    between local and remote task data.
-    <a href="/conflicts/" class="alert-link">Resolve now</a>
-</div>
-{% endif %}
-
 <div class="row row-cols-1 row-cols-md-2 row-cols-lg-3 g-4">
     {% for wt in worktrees %}
     <div class="col">
@@ -108,36 +99,6 @@
         </div>
     </div>
     {% endfor %}
-</div>
-
-<div class="mt-4">
-    <h5>Sync Status</h5>
-    <div class="row">
-        <div class="col-md-4">
-            <div class="card">
-                <div class="card-body text-center">
-                    <h3>{{ sync_status.json_task_count }}</h3>
-                    <small class="text-muted">Tasks in JSON (git)</small>
-                </div>
-            </div>
-        </div>
-        <div class="col-md-4">
-            <div class="card">
-                <div class="card-body text-center">
-                    <h3>{{ sync_status.sqlite_task_count }}</h3>
-                    <small class="text-muted">Tasks in SQLite (local)</small>
-                </div>
-            </div>
-        </div>
-        <div class="col-md-4">
-            <div class="card">
-                <div class="card-body text-center">
-                    <h3>{{ sync_status.synced|length }}</h3>
-                    <small class="text-muted">In Sync</small>
-                </div>
-            </div>
-        </div>
-    </div>
 </div>
 
 <!-- Close Worktree Modal -->

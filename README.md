@@ -106,7 +106,7 @@ This will:
 | `worktree-manager clone-db <index>` | | Clone database from another worktree |
 | `worktree-manager cleanup-orphans` | | Clean up orphaned Docker resources |
 | `worktree-manager web [--port PORT]` | | Start the Kanban web interface |
-| `worktree-manager sync` | | Sync tasks between JSON and SQLite |
+| `worktree-manager sync-tasks` | | Sync tasks with worktree registry |
 | `worktree-manager setup` | | Run interactive setup wizard |
 | `worktree-manager config` | | Show or modify configuration |
 | `worktree-manager init` | | Initialize project configuration |
@@ -127,8 +127,7 @@ The Kanban web interface provides:
 - **Board View**: Drag-and-drop tasks between Todo, In Progress, and Done columns
 - **Worktrees View**: See all worktrees with their status, ports, and actions
 - **Close Worktree**: Close worktrees with safety checks (uncommitted changes, unpushed commits, unmerged branches)
-- **Clone Database**: Clone databases between worktrees
-- **Sync Status**: View and resolve sync conflicts between local and git-tracked tasks
+- **Load Database**: Load production database dumps into worktrees
 
 Start the web interface:
 
@@ -150,28 +149,9 @@ Worktrees are assigned ports based on their index to prevent conflicts:
 
 Ports are stored in the `.env` file as `WEB_PORT` and `DB_PORT`.
 
-## Task Synchronization
+## Task Storage
 
-Tasks are stored in two locations for flexibility:
-
-- **SQLite** (`~/.config/dispatch-guru/tasks.db`): Fast local queries, used by the web UI
-- **JSON** (`.worktree-tasks.json`): Version-controlled, shareable across machines via git
-
-Use `worktree-manager sync` to synchronize between them:
-
-```bash
-# Full bidirectional sync
-worktree-manager sync
-
-# Pull from JSON to SQLite only
-worktree-manager sync --pull
-
-# Push from SQLite to JSON only
-worktree-manager sync --push
-
-# Auto-commit changes to git
-worktree-manager sync --commit
-```
+Tasks are stored in a local SQLite database (`~/.config/dispatch-guru/tasks.db`). When you create a worktree, a corresponding task is automatically created on the Kanban board. Use `worktree-manager sync-tasks` to ensure tasks are in sync with the worktree registry.
 
 ## Configuration
 

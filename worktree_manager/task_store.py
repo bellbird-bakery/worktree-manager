@@ -1,13 +1,12 @@
 """
 Task storage for worktree task tracking.
 
-Provides both JSON-based storage (for git sync) and SQLite storage (for local web UI).
+Provides SQLite storage for the local web UI and Kanban board.
 This module is Django-free and can be used standalone.
 """
 
 from __future__ import annotations
 
-import json
 import logging
 import os
 import sqlite3
@@ -17,7 +16,6 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from enum import Enum
 from pathlib import Path
-from typing import TypedDict
 
 from . import TASK_DB_PATH
 
@@ -80,7 +78,6 @@ class Task:
     # Auto-managed timestamps
     created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
     updated_at: datetime = field(default_factory=lambda: datetime.now(UTC))
-    last_synced_at: datetime | None = None
 
     # Database ID (set when loaded from SQLite)
     id: int | None = None
@@ -122,7 +119,7 @@ class Task:
         self.updated_at = datetime.now(UTC)
 
     def to_dict(self) -> dict:
-        """Convert to dictionary for JSON serialization."""
+        """Convert to dictionary for serialization."""
         return {
             'title': self.title,
             'description': self.description,
@@ -132,19 +129,17 @@ class Task:
             'worktree_path': self.worktree_path,
             'created_at': self.created_at.isoformat(),
             'updated_at': self.updated_at.isoformat(),
-            'last_synced_at': self.last_synced_at.isoformat() if self.last_synced_at else None,
         }
 
     @classmethod
     def from_dict(cls, feature_name: str, data: dict) -> Task:
-        """Create Task from dictionary (e.g., from JSON)."""
+        """Create Task from dictionary."""
         created_at = (
             parse_timestamp(data.get('created_at', '')) if data.get('created_at') else datetime.now(UTC)
         )
         updated_at = (
             parse_timestamp(data.get('updated_at', '')) if data.get('updated_at') else datetime.now(UTC)
         )
-        last_synced_at = parse_timestamp(data['last_synced_at']) if data.get('last_synced_at') else None
 
         return cls(
             feature_name=feature_name,
@@ -156,147 +151,12 @@ class Task:
             notes=data.get('notes', ''),
             created_at=created_at,
             updated_at=updated_at,
-            last_synced_at=last_synced_at,
         )
 
 
 # ==============================================================================
-# JSON Storage (for git sync)
+# Utility Functions
 # ==============================================================================
-
-
-class TaskData(TypedDict, total=False):
-    """Task data structure for JSON storage."""
-
-    title: str
-    description: str
-    status: str
-    priority: int
-    notes: str
-    worktree_path: str
-    created_at: str
-    updated_at: str
-    last_synced_at: str | None
-
-
-class TaskStore(TypedDict):
-    """Root structure of the task store JSON file."""
-
-    version: int
-    tasks: dict[str, TaskData]
-
-
-TASK_FILE_NAME = '.worktree-tasks.json'
-CURRENT_VERSION = 1
-
-
-def find_repo_root(start_path: Path | None = None) -> Path | None:
-    """
-    Find git repository root from the given path or current directory.
-
-    Walks up the directory tree looking for a .git directory.
-    Returns None if not inside a git repository.
-    """
-    cwd = start_path or Path.cwd()
-
-    # Handle worktrees: .git might be a file pointing to the main repo
-    for parent in [cwd, *cwd.parents]:
-        git_path = parent / '.git'
-        if git_path.exists():
-            return parent
-
-    return None
-
-
-def get_task_file(repo_root: Path | None = None) -> Path | None:
-    """
-    Get path to .worktree-tasks.json in repository root.
-
-    Returns None if not inside a git repository.
-    """
-    repo = repo_root or find_repo_root()
-    return repo / TASK_FILE_NAME if repo else None
-
-
-def read_tasks(repo_root: Path | None = None) -> TaskStore:
-    """
-    Read tasks from JSON file.
-
-    Returns an empty store if the file doesn't exist or we're not in a repo.
-    """
-    path = get_task_file(repo_root)
-    if not path or not path.exists():
-        return {'version': CURRENT_VERSION, 'tasks': {}}
-
-    try:
-        data = json.loads(path.read_text())
-        # Ensure required structure
-        if 'version' not in data:
-            data['version'] = CURRENT_VERSION
-        if 'tasks' not in data:
-            data['tasks'] = {}
-        return data
-    except (json.JSONDecodeError, OSError) as e:
-        logger.warning(f'Failed to read {path}: {e}')
-        return {'version': CURRENT_VERSION, 'tasks': {}}
-
-
-def write_tasks(store: TaskStore, repo_root: Path | None = None) -> bool:
-    """
-    Write tasks to JSON file.
-
-    Returns True on success, False if not in a git repository or write fails.
-    """
-    path = get_task_file(repo_root)
-    if not path:
-        return False
-
-    try:
-        # Pretty-print with sorted keys for clean git diffs
-        content = json.dumps(store, indent=2, sort_keys=True)
-        path.write_text(content + '\n')  # Trailing newline for git
-        return True
-    except OSError as e:
-        logger.warning(f'Failed to write {path}: {e}')
-        return False
-
-
-def task_to_json(
-    feature_name: str,
-    title: str,
-    status: str,
-    description: str = '',
-    priority: int = 0,
-    notes: str = '',
-    worktree_path: str = '',
-    created_at: datetime | None = None,
-    updated_at: datetime | None = None,
-) -> TaskData:
-    """
-    Create a TaskData dict from task fields.
-
-    Timestamps are normalized to UTC ISO 8601 format.
-    """
-    now = datetime.now(UTC)
-    created = created_at or now
-    updated = updated_at or now
-
-    # Ensure UTC
-    if created.tzinfo is None:
-        created = created.replace(tzinfo=UTC)
-    if updated.tzinfo is None:
-        updated = updated.replace(tzinfo=UTC)
-
-    return {
-        'title': title,
-        'description': description,
-        'status': status,
-        'priority': priority,
-        'notes': notes,
-        'worktree_path': worktree_path,
-        'created_at': created.isoformat(),
-        'updated_at': updated.isoformat(),
-    }
 
 
 def parse_timestamp(iso_string: str) -> datetime:
@@ -309,61 +169,8 @@ def parse_timestamp(iso_string: str) -> datetime:
     return datetime.fromisoformat(iso_string)
 
 
-def add_task(
-    feature_name: str,
-    title: str,
-    status: str = 'todo',
-    repo_root: Path | None = None,
-) -> bool:
-    """
-    Add a new task to the store.
-
-    Returns True on success, False if task already exists or write fails.
-    """
-    store = read_tasks(repo_root)
-
-    if feature_name in store['tasks']:
-        return False
-
-    store['tasks'][feature_name] = task_to_json(
-        feature_name=feature_name,
-        title=title,
-        status=status,
-    )
-
-    return write_tasks(store, repo_root)
-
-
-def update_task_status(
-    feature_name: str,
-    status: str,
-    repo_root: Path | None = None,
-) -> bool:
-    """
-    Update a task's status in the store.
-
-    Returns True on success, False if task doesn't exist or write fails.
-    """
-    store = read_tasks(repo_root)
-
-    if feature_name not in store['tasks']:
-        return False
-
-    task = store['tasks'][feature_name]
-    task['status'] = status
-    task['updated_at'] = datetime.now(UTC).isoformat()
-
-    return write_tasks(store, repo_root)
-
-
-def get_task(feature_name: str, repo_root: Path | None = None) -> TaskData | None:
-    """Get a task by feature name, or None if not found."""
-    store = read_tasks(repo_root)
-    return store['tasks'].get(feature_name)
-
-
 # ==============================================================================
-# SQLite Storage (for local web UI)
+# SQLite Storage
 # ==============================================================================
 
 
@@ -431,7 +238,6 @@ def _row_to_task(row: sqlite3.Row) -> Task:
         notes=row['notes'] or '',
         created_at=parse_timestamp(row['created_at']),
         updated_at=parse_timestamp(row['updated_at']),
-        last_synced_at=parse_timestamp(row['last_synced_at']) if row['last_synced_at'] else None,
     )
 
 
@@ -561,7 +367,7 @@ class TaskManager:
 
         for key, value in kwargs.items():
             updates.append(f'{key} = ?')
-            if key in ('created_at', 'updated_at', 'last_synced_at') and isinstance(value, datetime):
+            if key in ('created_at', 'updated_at') and isinstance(value, datetime):
                 params.append(value.isoformat())
             else:
                 params.append(value)
@@ -611,7 +417,7 @@ def save_task(task: Task) -> Task:
                 """
                 UPDATE tasks SET
                     title = ?, description = ?, status = ?, worktree_path = ?,
-                    priority = ?, notes = ?, updated_at = ?, last_synced_at = ?
+                    priority = ?, notes = ?, updated_at = ?
                 WHERE id = ?
                 """,
                 (
@@ -622,7 +428,6 @@ def save_task(task: Task) -> Task:
                     task.priority,
                     task.notes,
                     now,
-                    task.last_synced_at.isoformat() if task.last_synced_at else None,
                     task.id,
                 ),
             )
@@ -640,8 +445,8 @@ def save_task(task: Task) -> Task:
                 """
                 INSERT INTO tasks (
                     feature_name, title, description, status, worktree_path,
-                    priority, notes, created_at, updated_at, last_synced_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    priority, notes, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     task.feature_name,
@@ -653,7 +458,6 @@ def save_task(task: Task) -> Task:
                     task.notes,
                     task.created_at.isoformat(),
                     now,
-                    task.last_synced_at.isoformat() if task.last_synced_at else None,
                 ),
             )
             task.id = cursor.lastrowid

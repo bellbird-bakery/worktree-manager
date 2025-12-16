@@ -24,17 +24,8 @@ from ..git_ops import (
     validate_feature_name,
 )
 from ..registry import locked_registry, read_registry
-from ..sync import (
-    detect_conflicts,
-    get_sync_status,
-    resolve_conflict,
-    sync_json_to_sqlite,
-    sync_sqlite_to_json,
-)
 from ..task_store import (
     TaskStatus,
-    find_repo_root,
-    get_task_file,
     get_tasks_by_status,
     save_task,
     tasks,
@@ -177,12 +168,6 @@ async def move_task(request: Request) -> Response:
         except Exception as e:
             logger.warning(f'Hook execution failed: {e}')
 
-    # Sync to JSON
-    try:
-        sync_sqlite_to_json()
-    except Exception as e:
-        logger.warning(f'JSON sync failed after task move: {e}')
-
     return JSONResponse(
         {
             'success': True,
@@ -242,12 +227,6 @@ async def confirm_hook(request: Request) -> Response:
         except Exception as e:
             logger.warning(f'Hook execution failed: {e}')
 
-    # Sync to JSON
-    try:
-        sync_sqlite_to_json()
-    except Exception as e:
-        logger.warning(f'JSON sync failed after task move: {e}')
-
     return JSONResponse(
         {
             'success': True,
@@ -296,7 +275,6 @@ async def worktree_list(request: Request) -> Response:
                 'web_port': local_wt.ports.web if local_wt else None,
                 'db_port': local_wt.ports.db if local_wt else None,
                 'updated_at': task.updated_at,
-                'last_synced_at': task.last_synced_at,
             }
         )
         seen_features.add(task.feature_name)
@@ -315,7 +293,6 @@ async def worktree_list(request: Request) -> Response:
                     'web_port': wt.ports.web,
                     'db_port': wt.ports.db,
                     'updated_at': None,
-                    'last_synced_at': None,
                 }
             )
 
@@ -328,16 +305,11 @@ async def worktree_list(request: Request) -> Response:
     }
     worktree_data.sort(key=lambda x: (status_order.get(x['status'], 3), x['feature_name']))
 
-    # Get sync status
-    sync_status = get_sync_status()
-
     return templates.TemplateResponse(
         request,
         'worktrees.html',
         {
             'worktrees': worktree_data,
-            'sync_status': sync_status,
-            'conflict_count': len(sync_status['conflicts']),
             'repo_info': get_current_repo_info(),
         },
     )
@@ -604,138 +576,6 @@ async def worktree_close(request: Request) -> Response:
             'warnings': errors if errors else None,
         }
     )
-
-
-# ==============================================================================
-# Sync Routes
-# ==============================================================================
-
-
-async def sync_status_view(request: Request) -> Response:
-    """Show sync status between JSON and SQLite."""
-    templates = get_templates(request)
-    sync_status = get_sync_status()
-
-    repo_root = find_repo_root()
-    task_file = get_task_file(repo_root) if repo_root else None
-
-    return templates.TemplateResponse(
-        request,
-        'sync_status.html',
-        {
-            'sync_status': sync_status,
-            'task_file': str(task_file) if task_file else None,
-            'task_file_exists': task_file.exists() if task_file else False,
-            'repo_root': str(repo_root) if repo_root else None,
-        },
-    )
-
-
-async def sync_pull(request: Request) -> Response:
-    """Pull from JSON to SQLite."""
-    result = sync_json_to_sqlite()
-
-    if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
-        return JSONResponse(
-            {
-                'success': True,
-                'created': result.created,
-                'updated': result.updated,
-                'unchanged': result.unchanged,
-                'errors': result.errors,
-            }
-        )
-
-    return RedirectResponse(url=request.url_for('sync_status'), status_code=303)
-
-
-async def sync_push(request: Request) -> Response:
-    """Push from SQLite to JSON."""
-    result = sync_sqlite_to_json()
-
-    if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
-        return JSONResponse(
-            {
-                'success': True,
-                'created': result.created,
-                'updated': result.updated,
-                'unchanged': result.unchanged,
-                'errors': result.errors,
-            }
-        )
-
-    return RedirectResponse(url=request.url_for('sync_status'), status_code=303)
-
-
-async def conflict_list(request: Request) -> Response:
-    """List all conflicts between JSON and SQLite."""
-    templates = get_templates(request)
-    conflicts = detect_conflicts()
-
-    return templates.TemplateResponse(
-        request,
-        'conflicts.html',
-        {'conflicts': conflicts},
-    )
-
-
-async def conflict_detail(request: Request) -> Response:
-    """Show details of a specific conflict for resolution."""
-    templates = get_templates(request)
-    feature_name = request.path_params['feature_name']
-    conflicts = detect_conflicts()
-
-    conflict = None
-    for c in conflicts:
-        if c.feature_name == feature_name:
-            conflict = c
-            break
-
-    if not conflict:
-        return RedirectResponse(url=request.url_for('conflict_list'), status_code=303)
-
-    task = tasks.get_by_feature(feature_name)
-    if not task:
-        return RedirectResponse(url=request.url_for('conflict_list'), status_code=303)
-
-    return templates.TemplateResponse(
-        request,
-        'conflict_resolve.html',
-        {
-            'conflict': conflict,
-            'task': task,
-            'json_status': conflict.json_data.get('status'),
-            'sqlite_status': conflict.sqlite_status,
-        },
-    )
-
-
-async def conflict_resolve(request: Request) -> Response:
-    """Resolve a conflict by choosing JSON or SQLite version."""
-    feature_name = request.path_params['feature_name']
-    form = await request.form()
-    action = form.get('action')
-
-    if action == 'use_json':
-        success = resolve_conflict(feature_name, use_json=True)
-    elif action == 'use_local':
-        success = resolve_conflict(feature_name, use_json=False)
-    else:
-        return RedirectResponse(
-            url=request.url_for('conflict_detail', feature_name=feature_name),
-            status_code=303,
-        )
-
-    if success:
-        remaining = detect_conflicts()
-        if remaining:
-            return RedirectResponse(url=request.url_for('conflict_list'), status_code=303)
-        return RedirectResponse(url=request.url_for('worktree_list'), status_code=303)
-    else:
-        return RedirectResponse(
-            url=request.url_for('conflict_detail', feature_name=feature_name),
-            status_code=303,
-        )
 
 
 # ==============================================================================

@@ -113,42 +113,8 @@ def main() -> int:
     web_parser.add_argument('--port', type=int, default=8000, help='Port to run on (default: 8000)')
     web_parser.add_argument('--host', default='127.0.0.1', help='Host to bind to (default: 127.0.0.1)')
 
-    # sync-tasks command (legacy, syncs with registry)
+    # sync-tasks command (syncs tasks with worktree registry)
     subparsers.add_parser('sync-tasks', help='Sync tasks with worktree registry')
-
-    # sync command (new, syncs with git repo JSON file)
-    sync_parser = subparsers.add_parser('sync', help='Sync tasks with git repo JSON file')
-    sync_parser.add_argument(
-        '--pull',
-        action='store_true',
-        help='Pull from JSON only (JSON → SQLite)',
-    )
-    sync_parser.add_argument(
-        '--push',
-        action='store_true',
-        help='Push to JSON only (SQLite → JSON)',
-    )
-    sync_parser.add_argument(
-        '--commit',
-        action='store_true',
-        help='Auto-commit changes to .worktree-tasks.json',
-    )
-
-    # cleanup-tasks command
-    cleanup_tasks_parser = subparsers.add_parser(
-        'cleanup-tasks',
-        help='Remove orphaned tasks from JSON (tasks with no local worktree)',
-    )
-    cleanup_tasks_parser.add_argument(
-        '--dry-run',
-        action='store_true',
-        help='Show what would be removed without deleting',
-    )
-    cleanup_tasks_parser.add_argument(
-        '--commit',
-        action='store_true',
-        help='Auto-commit changes to .worktree-tasks.json',
-    )
 
     # setup command
     subparsers.add_parser('setup', help='Run interactive setup wizard')
@@ -213,12 +179,6 @@ def main() -> int:
             return commands.start_web(host=args.host, port=args.port)
         elif args.command == 'sync-tasks':
             return commands.sync_tasks_cmd()
-        elif args.command == 'sync':
-            return commands.sync_cmd(
-                pull_only=args.pull,
-                push_only=args.push,
-                auto_commit=args.commit,
-            )
         elif args.command == 'setup':
             return commands.setup_cmd()
         elif args.command == 'config':
@@ -229,11 +189,6 @@ def main() -> int:
             )
         elif args.command == 'init':
             return commands.init_cmd(from_legacy=args.from_legacy)
-        elif args.command == 'cleanup-tasks':
-            return commands.cleanup_tasks_cmd(
-                dry_run=args.dry_run,
-                auto_commit=args.commit,
-            )
         else:
             parser.print_help()
             return 1

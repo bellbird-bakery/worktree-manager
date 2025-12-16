@@ -36,8 +36,7 @@ worktree-manager/
     ├── ports.py            # Port allocation logic
     ├── registry.py         # Worktree registry (JSON file storage)
     ├── setup_wizard.py     # Interactive setup
-    ├── sync.py             # JSON <-> SQLite synchronization
-    ├── task_store.py       # Task storage (SQLite + JSON)
+    ├── task_store.py       # Task storage (SQLite)
     ├── validator.py        # Environment validation
     ├── hooks/              # Lifecycle hooks
     │   ├── __init__.py
@@ -112,8 +111,7 @@ async def my_route(request: Request) -> Response:
 ### Data Storage
 
 - **Registry** (`~/.config/dispatch-guru/registry.json`): Worktree metadata, ports, paths
-- **Tasks SQLite** (`~/.config/dispatch-guru/tasks.db`): Local task database
-- **Tasks JSON** (`.worktree-tasks.json`): Git-tracked task file for sharing
+- **Tasks** (`~/.config/dispatch-guru/tasks.db`): SQLite database for Kanban task tracking
 
 ### Port Allocation
 

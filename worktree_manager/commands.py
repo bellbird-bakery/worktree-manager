@@ -723,14 +723,6 @@ def create_task_for_worktree(feature_name: str, worktree_path: str) -> None:
                 'status': TaskStatus.TODO.value,
             },
         )
-
-        # Sync to JSON for git sync
-        try:
-            from .sync import sync_sqlite_to_json
-
-            sync_sqlite_to_json()
-        except Exception as e:
-            logger.warning(f'JSON sync failed: {e}')
     except Exception as e:
         logger.warning(f'Task creation failed for {feature_name}: {e}')
         console.print(f'[yellow]Warning: Task creation failed: {e}[/yellow]')
@@ -752,14 +744,6 @@ def complete_task_for_worktree(feature_name: str) -> None:
         if task:
             task.status = TaskStatus.DONE.value
             save_task(task)
-
-        # Sync to JSON for git sync
-        try:
-            from .sync import sync_sqlite_to_json
-
-            sync_sqlite_to_json()
-        except Exception as e:
-            logger.warning(f'JSON sync failed: {e}')
     except Exception as e:
         logger.warning(f'Task completion failed for {feature_name}: {e}')
         console.print(f'[yellow]Warning: Task completion failed: {e}[/yellow]')
@@ -841,173 +825,6 @@ def config_cmd(
 
     console.print('[dim]Config file: ~/.config/worktree-manager/config.json[/dim]')
     console.print('[dim]Run "worktree-manager setup" to reconfigure[/dim]')
-    console.print()
-
-    return 0
-
-
-def sync_cmd(pull_only: bool = False, push_only: bool = False, auto_commit: bool = False) -> int:
-    """
-    Synchronize tasks between JSON file and SQLite database.
-
-    Args:
-        pull_only: Only sync from JSON to SQLite.
-        push_only: Only sync from SQLite to JSON.
-        auto_commit: Automatically commit changes to git.
-
-    Returns:
-        Exit code (0 for success).
-    """
-    console.print()
-    console.print(Panel.fit('[bold]Task Sync[/bold]', border_style='blue'))
-    console.print()
-
-    # Check if we're in a git repo
-    from .task_store import ensure_db, find_repo_root, get_task_file
-
-    repo_root = find_repo_root()
-    if not repo_root:
-        console.print('[red]Error: Not in a git repository[/red]')
-        return 1
-
-    task_file = get_task_file(repo_root)
-    console.print(f'Task file: [cyan]{task_file}[/cyan]')
-    console.print()
-
-    # Ensure database exists
-    ensure_db()
-
-    # Perform sync
-    from .sync import auto_commit_tasks, full_sync, sync_json_to_sqlite, sync_sqlite_to_json
-
-    if pull_only:
-        console.print('Syncing JSON → SQLite...')
-        result = sync_json_to_sqlite(repo_root)
-        console.print(f'  Created: [green]{result.created}[/green]')
-        console.print(f'  Updated: [yellow]{result.updated}[/yellow]')
-        console.print(f'  Unchanged: [dim]{result.unchanged}[/dim]')
-        if result.errors:
-            for error in result.errors:
-                console.print(f'  [red]Error: {error}[/red]')
-
-    elif push_only:
-        console.print('Syncing SQLite → JSON...')
-        result = sync_sqlite_to_json(repo_root)
-        console.print(f'  Created: [green]{result.created}[/green]')
-        console.print(f'  Updated: [yellow]{result.updated}[/yellow]')
-        console.print(f'  Unchanged: [dim]{result.unchanged}[/dim]')
-        if result.errors:
-            for error in result.errors:
-                console.print(f'  [red]Error: {error}[/red]')
-
-    else:
-        console.print('Performing bidirectional sync...')
-        console.print()
-        stats = full_sync(repo_root)
-
-        console.print('JSON → SQLite:')
-        console.print(f'  Created: [green]{stats["json_to_sqlite"]["created"]}[/green]')
-        console.print(f'  Updated: [yellow]{stats["json_to_sqlite"]["updated"]}[/yellow]')
-        console.print()
-        console.print('SQLite → JSON:')
-        console.print(f'  Created: [green]{stats["sqlite_to_json"]["created"]}[/green]')
-        console.print(f'  Updated: [yellow]{stats["sqlite_to_json"]["updated"]}[/yellow]')
-
-        if stats.get('errors'):
-            console.print()
-            for error in stats['errors']:
-                console.print(f'[red]Error: {error}[/red]')
-
-    # Auto-commit if requested
-    if auto_commit:
-        console.print()
-        console.print('Committing changes...')
-        if auto_commit_tasks('Update task status via worktree-manager sync', repo_root):
-            console.print('[green]Changes committed[/green]')
-        else:
-            console.print('[dim]No changes to commit[/dim]')
-
-    console.print()
-    console.print(Panel.fit('[bold green]Sync Complete![/bold green]', border_style='green'))
-    console.print()
-
-    return 0
-
-
-def cleanup_tasks_cmd(dry_run: bool = False, auto_commit: bool = False) -> int:
-    """
-    Remove orphaned tasks from JSON (tasks with no local worktree).
-
-    Args:
-        dry_run: If True, show what would be removed without deleting.
-        auto_commit: Automatically commit changes to git.
-
-    Returns:
-        Exit code (0 for success).
-    """
-    console.print()
-    console.print(Panel.fit('[bold]Cleanup Orphaned Tasks[/bold]', border_style='yellow'))
-    console.print()
-
-    from .sync import auto_commit_tasks, cleanup_orphaned_tasks
-
-    # First, do a dry run to see what would be removed
-    result = cleanup_orphaned_tasks(dry_run=True)
-
-    if result['errors']:
-        for error in result['errors']:
-            console.print(f'[red]Error: {error}[/red]')
-
-    if not result['removed']:
-        console.print('[green]No orphaned tasks found![/green]')
-        console.print()
-        console.print(f'Tasks with active worktrees: [cyan]{len(result["kept"])}[/cyan]')
-        return 0
-
-    console.print(f'Found [yellow]{len(result["removed"])}[/yellow] orphaned tasks:')
-    console.print()
-    for feature in result['removed']:
-        console.print(f'  - [yellow]{feature}[/yellow]')
-    console.print()
-    console.print(f'Tasks with active worktrees: [green]{len(result["kept"])}[/green]')
-    console.print()
-
-    if dry_run:
-        console.print('[dim]Dry run - no changes made[/dim]')
-        return 0
-
-    # Confirm before deleting (unless -y flag was passed)
-    from .cli import should_prompt
-
-    if should_prompt():
-        console.print('[red]These tasks will be removed from .worktree-tasks.json[/red]')
-        console.print()
-        if not console.input('Continue? (yes/no): ').lower() == 'yes':
-            console.print('Cancelled.')
-            return 0
-
-    # Actually remove the tasks
-    result = cleanup_orphaned_tasks(dry_run=False)
-
-    if result['errors']:
-        for error in result['errors']:
-            console.print(f'[red]Error: {error}[/red]')
-        return 1
-
-    console.print()
-    console.print(f'[green]Removed {len(result["removed"])} orphaned tasks[/green]')
-
-    # Auto-commit if requested
-    if auto_commit:
-        console.print()
-        console.print('Committing changes...')
-        if auto_commit_tasks('Remove orphaned tasks via worktree-manager cleanup-tasks'):
-            console.print('[green]Changes committed[/green]')
-        else:
-            console.print('[dim]No changes to commit[/dim]')
-
-    console.print()
-    console.print(Panel.fit('[bold green]Cleanup Complete![/bold green]', border_style='green'))
     console.print()
 
     return 0
