@@ -690,12 +690,22 @@ async def load_db_action(request: Request) -> Response:
             timeout=600,  # 10 minutes for large databases
         )
 
+        # Truncate output to avoid massive JSON responses
+        # Keep first 20 lines and last 50 lines
+        def truncate_output(text: str, head: int = 20, tail: int = 50) -> str:
+            lines = text.splitlines()
+            if len(lines) <= head + tail:
+                return text
+            return '\n'.join(
+                lines[:head] + [f'\n... ({len(lines) - head - tail} lines omitted) ...\n'] + lines[-tail:]
+            )
+
         if result.returncode == 0:
             return JSONResponse(
                 {
                     'success': True,
                     'message': f'Database loaded to {target.feature_name}',
-                    'output': result.stdout,
+                    'output': truncate_output(result.stdout),
                 }
             )
         else:
@@ -703,7 +713,7 @@ async def load_db_action(request: Request) -> Response:
                 {
                     'success': False,
                     'error': 'Load failed',
-                    'output': result.stdout + result.stderr,
+                    'output': truncate_output(result.stdout + result.stderr),
                 },
                 status_code=500,
             )
