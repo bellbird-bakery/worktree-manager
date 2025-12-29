@@ -52,12 +52,13 @@ from .validator import validate_worktree
 console = Console()
 
 
-def create_worktree_cmd(feature_name: str) -> int:
+def create_worktree_cmd(feature_name: str, branch_type: str = 'feature') -> int:
     """
     Create a new worktree with automatic port assignment.
 
     Args:
         feature_name: Name for the feature branch.
+        branch_type: Branch prefix type ('feature' or 'fix').
 
     Returns:
         Exit code (0 for success, non-zero for failure).
@@ -112,7 +113,9 @@ def create_worktree_cmd(feature_name: str) -> int:
         # Create git worktree
         console.print('Creating git worktree...')
         try:
-            worktree_path, branch_name = create_worktree(feature_name, repo_path=str(main_repo))
+            worktree_path, branch_name = create_worktree(
+                feature_name, repo_path=str(main_repo), branch_type=branch_type
+            )
             console.print(f'[green]Created: {worktree_path}[/green]')
         except GitError as e:
             console.print(f'[red]Error creating worktree: {e}[/red]')

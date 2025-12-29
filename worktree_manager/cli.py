@@ -70,6 +70,13 @@ def main() -> int:
     # create command
     create_parser = subparsers.add_parser('create', help='Create a new worktree')
     create_parser.add_argument('feature', help="Feature branch name (e.g., 'my-feature')")
+    create_parser.add_argument(
+        '-t',
+        '--type',
+        choices=['feature', 'fix'],
+        default='feature',
+        help="Branch type prefix (default: feature)",
+    )
 
     # list command
     subparsers.add_parser('list', help='List all worktrees')
@@ -156,7 +163,7 @@ def main() -> int:
             except ValueError as e:
                 print(f'Error: {e}', file=sys.stderr)
                 return 1
-            return commands.create_worktree_cmd(args.feature)
+            return commands.create_worktree_cmd(args.feature, branch_type=args.type)
         elif args.command == 'list':
             return commands.list_worktrees_cmd()
         elif args.command == 'status':
