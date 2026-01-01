@@ -102,14 +102,14 @@ def main() -> int:
         help='Target worktree feature name (default: current directory)',
     )
     load_db_parser.add_argument(
-        '--skip-dump',
+        '--dump',
         action='store_true',
-        help='Use cached production dump instead of fetching fresh',
+        help='Fetch fresh production dump (default: use cached)',
     )
     load_db_parser.add_argument(
-        '--skip-backup',
+        '--backup',
         action='store_true',
-        help='Skip backing up current local database',
+        help='Backup current local database before loading (default: skip)',
     )
 
     # update-last-accessed command
@@ -177,8 +177,8 @@ def main() -> int:
         elif args.command == 'load-db':
             return commands.load_db_cmd(
                 feature_name=args.feature_name,
-                skip_dump=args.skip_dump,
-                skip_backup=args.skip_backup,
+                do_dump=args.dump,
+                do_backup=args.backup,
             )
         elif args.command == 'update-last-accessed':
             return commands.update_last_accessed()

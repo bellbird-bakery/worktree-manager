@@ -23,6 +23,11 @@
     <i class="bi bi-exclamation-triangle me-2"></i>
     <strong>Docker is not running!</strong> Database load requires Docker to be running.
 </div>
+{% elif not db_running %}
+<div class="alert alert-danger">
+    <i class="bi bi-exclamation-triangle me-2"></i>
+    <strong>Database container is not running!</strong> Start the worktree containers first.
+</div>
 {% endif %}
 
 {% if not script_exists %}
@@ -54,12 +59,13 @@
                     <div class="mb-3">
                         <label class="form-label">Options</label>
                         <div class="form-check">
-                            <input class="form-check-input" type="checkbox" id="skip_dump" name="skip_dump"{% if not latest_dump %} disabled{% endif %}>
-                            <label class="form-check-label" for="skip_dump">
-                                <strong>Use cached dump</strong> - Skip fetching new production data
+                            <input class="form-check-input" type="checkbox" id="do_dump" name="do_dump"{% if not latest_dump %} checked{% endif %}>
+                            <label class="form-check-label" for="do_dump">
+                                <strong>Fetch fresh dump</strong> - Download new production data
                             </label>
                             {% if latest_dump %}
                             <div class="mt-1 ms-4">
+                                <small class="text-muted">Cached dump available: </small>
                                 <span class="badge {% if latest_dump.age_hours < 24 %}bg-success{% elif latest_dump.age_hours < 72 %}bg-warning text-dark{% else %}bg-secondary{% endif %}">
                                     {{ latest_dump.modified|date("M j, H:i") }}
                                 </span>
@@ -68,15 +74,15 @@
                                 </small>
                             </div>
                             {% else %}
-                            <small class="form-text text-danger d-block">No cached dump available - must fetch from production</small>
+                            <small class="form-text text-warning d-block">No cached dump available - will fetch from production</small>
                             {% endif %}
                         </div>
                         <div class="form-check mt-2">
-                            <input class="form-check-input" type="checkbox" id="skip_local_backup" name="skip_local_backup">
-                            <label class="form-check-label" for="skip_local_backup">
-                                <strong>Skip local backup</strong> - Don't backup current local database
+                            <input class="form-check-input" type="checkbox" id="do_backup" name="do_backup">
+                            <label class="form-check-label" for="do_backup">
+                                <strong>Backup local database</strong> - Save current data before replacing
                             </label>
-                            <small class="form-text text-muted d-block">Faster but you won't be able to restore your current data</small>
+                            <small class="form-text text-muted d-block">Enable if you may need to restore your current data later</small>
                         </div>
                     </div>
 
@@ -95,7 +101,7 @@
                     </div>
 
                     <div class="d-flex gap-2">
-                        <button type="submit" class="btn btn-danger" id="load-btn" {% if not docker_running or not script_exists %}disabled{% endif %}>
+                        <button type="submit" class="btn btn-danger" id="load-btn" {% if not docker_running or not script_exists or not db_running %}disabled{% endif %}>
                             <i class="bi bi-database-add me-1"></i>Load Database
                         </button>
                         <a href="/worktrees/" class="btn btn-outline-secondary">Cancel</a>
@@ -198,11 +204,11 @@ document.getElementById('load-form')?.addEventListener('submit', async function(
         const formData = new FormData();
 
         // Add checkbox values
-        if (document.getElementById('skip_dump').checked) {
-            formData.append('skip_dump', '1');
+        if (document.getElementById('do_dump').checked) {
+            formData.append('do_dump', '1');
         }
-        if (document.getElementById('skip_local_backup').checked) {
-            formData.append('skip_local_backup', '1');
+        if (document.getElementById('do_backup').checked) {
+            formData.append('do_backup', '1');
         }
 
         const response = await fetch('/worktrees/{{ target.feature_name }}/load-db/run/', {

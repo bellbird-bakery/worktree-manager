@@ -241,7 +241,7 @@ def locked_registry(main_repo_path: str | None = None, timeout: int = LOCK_TIMEO
         except FileLockTimeout:
             raise RegistryLockError(
                 f'Could not acquire registry lock within {timeout} seconds. Another process may be holding the lock.'
-            )
+            ) from None
     else:
         # Fallback to fcntl (Linux/macOS only)
         logger.warning('filelock not installed, using fcntl (Linux/macOS only)')

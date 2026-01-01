@@ -218,8 +218,8 @@ def build_context(
     )
 
 
-# Re-export for convenience
-from .config import HookConfig
+# Re-export for convenience - noqa required as this is intentionally at bottom for re-export
+from .config import HookConfig  # noqa: E402
 
 __all__ = [
     'TransitionContext',

@@ -14,8 +14,6 @@ from datetime import datetime
 from pathlib import Path
 
 from rich.console import Console
-
-logger = logging.getLogger('worktree_manager')
 from rich.panel import Panel
 from rich.table import Table
 
@@ -49,6 +47,7 @@ from .ports import calculate_ports_for_index, validate_ports
 from .registry import WorktreeEntry, locked_registry, read_registry
 from .validator import validate_worktree
 
+logger = logging.getLogger('worktree_manager')
 console = Console()
 
 
@@ -942,16 +941,16 @@ PROD_RESTORE_SCRIPT = Path('/home/jeremy/projects/dispatch-guru/database_tools/u
 
 def load_db_cmd(
     feature_name: str | None = None,
-    skip_dump: bool = False,
-    skip_backup: bool = False,
+    do_dump: bool = False,
+    do_backup: bool = False,
 ) -> int:
     """
     Load production database into a worktree.
 
     Args:
         feature_name: Target worktree feature name. If None, uses current directory.
-        skip_dump: Use cached production dump instead of fetching fresh.
-        skip_backup: Skip backing up current local database.
+        do_dump: Fetch fresh production dump (default: use cached).
+        do_backup: Backup current local database before loading (default: skip).
 
     Returns:
         Exit code (0 for success).
@@ -1000,14 +999,27 @@ def load_db_cmd(
         console.print(f'[red]Error: Restore script not found at {PROD_RESTORE_SCRIPT}[/red]')
         return 1
 
-    # Build flags
+    # Check if postgres container is running
+    containers = compose_ps(target.path, target.compose_project_name)
+    db_containers = [c for c in containers if 'db' in c.name.lower() or 'postgres' in c.name.lower()]
+    db_running = any(c.status.lower() == 'running' for c in db_containers)
+    if not db_running:
+        console.print('[red]Error: Database container is not running[/red]')
+        console.print('[dim]Start the worktree containers first with: wt open[/dim]')
+        return 1
+
+    # Build flags - by default we skip dump and backup for speed
     flags = []
-    if skip_dump:
+    if not do_dump:
         flags.append('--skip-dump')
-        console.print('[dim]Using cached production dump[/dim]')
-    if skip_backup:
+        console.print('[dim]Using cached production dump (use --dump to fetch fresh)[/dim]')
+    else:
+        console.print('[cyan]Fetching fresh production dump...[/cyan]')
+    if not do_backup:
         flags.append('--skip-local-backup')
-        console.print('[dim]Skipping local database backup[/dim]')
+        console.print('[dim]Skipping local database backup (use --backup to backup first)[/dim]')
+    else:
+        console.print('[cyan]Backing up local database first...[/cyan]')
 
     # Confirm
     if should_prompt():

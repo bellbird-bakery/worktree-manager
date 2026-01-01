@@ -14,7 +14,7 @@ from pathlib import Path
 from starlette.requests import Request
 from starlette.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 
-from ..docker_ops import compose_down, fix_permissions, is_docker_running
+from ..docker_ops import compose_down, compose_ps, fix_permissions, is_docker_running
 from ..git_ops import (
     get_main_repo_root,
     has_uncommitted_changes_in_path,
@@ -632,6 +632,11 @@ async def load_db_form(request: Request) -> Response:
     # Get latest cached dump info
     latest_dump = get_latest_prod_dump()
 
+    # Check if postgres container is running
+    containers = compose_ps(target.path, target.compose_project_name)
+    db_containers = [c for c in containers if 'db' in c.name.lower() or 'postgres' in c.name.lower()]
+    db_running = any(c.status.lower() == 'running' for c in db_containers)
+
     return templates.TemplateResponse(
         request,
         'load_db.html',
@@ -640,6 +645,7 @@ async def load_db_form(request: Request) -> Response:
             'script_exists': script_exists,
             'script_path': str(PROD_RESTORE_SCRIPT),
             'docker_running': is_docker_running(),
+            'db_running': db_running,
             'latest_dump': latest_dump,
         },
     )
@@ -664,11 +670,22 @@ async def load_db_action(request: Request) -> Response:
             status_code=500,
         )
 
+    # Check if postgres container is running
+    containers = compose_ps(target.path, target.compose_project_name)
+    db_containers = [c for c in containers if 'db' in c.name.lower() or 'postgres' in c.name.lower()]
+    db_running = any(c.status.lower() == 'running' for c in db_containers)
+    if not db_running:
+        return JSONResponse(
+            {'error': 'Database container is not running. Start the worktree containers first.'},
+            status_code=400,
+        )
+
     # Build command flags from form options
+    # Default is to skip dump and backup for speed
     flags = []
-    if form.get('skip_dump'):
+    if not form.get('do_dump'):
         flags.append('--skip-dump')
-    if form.get('skip_local_backup'):
+    if not form.get('do_backup'):
         flags.append('--skip-local-backup')
 
     # Set up environment with DG_PATH pointing to target worktree
