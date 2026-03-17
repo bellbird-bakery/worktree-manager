@@ -77,6 +77,11 @@ def main() -> int:
         default='feature',
         help="Branch type prefix (default: feature)",
     )
+    create_parser.add_argument(
+        '--raw',
+        action='store_true',
+        help="Use branch name as-is without prefix (e.g., '003-my-branch')",
+    )
 
     # list command
     subparsers.add_parser('list', help='List all worktrees')
@@ -163,7 +168,8 @@ def main() -> int:
             except ValueError as e:
                 print(f'Error: {e}', file=sys.stderr)
                 return 1
-            return commands.create_worktree_cmd(args.feature, branch_type=args.type)
+            branch_type = None if args.raw else args.type
+            return commands.create_worktree_cmd(args.feature, branch_type=branch_type)
         elif args.command == 'list':
             return commands.list_worktrees_cmd()
         elif args.command == 'status':

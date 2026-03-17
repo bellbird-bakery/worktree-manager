@@ -162,7 +162,7 @@ def create_worktree(
     feature_name: str,
     base_branch: str = 'develop',
     repo_path: str | None = None,
-    branch_type: str = 'feature',
+    branch_type: str | None = 'feature',
 ) -> tuple[Path, str]:
     """
     Create a new git worktree.
@@ -171,7 +171,7 @@ def create_worktree(
         feature_name: Name of the feature (used for branch and directory name).
         base_branch: Base branch to create the feature branch from.
         repo_path: Optional path to the main repository.
-        branch_type: Branch prefix type ('feature' or 'fix').
+        branch_type: Branch prefix type ('feature' or 'fix'). None for raw (no prefix).
 
     Returns:
         Tuple of (worktree_path, branch_name)
@@ -180,7 +180,7 @@ def create_worktree(
         GitError: If worktree creation fails.
     """
     main_repo = Path(repo_path) if repo_path else get_main_repo_root()
-    branch_name = f'{branch_type}/{feature_name}'
+    branch_name = f'{branch_type}/{feature_name}' if branch_type else feature_name
     worktree_dir = f'wt-{feature_name}'
     worktree_path = main_repo.parent / worktree_dir
 

@@ -67,6 +67,19 @@ This will:
 4. Create a `.env` file with the allocated ports
 5. Add a task to the Kanban board
 
+#### Branch type options
+
+```bash
+# Default: creates feature/my-feature
+worktree-manager create my-feature
+
+# Fix branch: creates fix/my-bugfix
+worktree-manager create my-bugfix -t fix
+
+# Raw branch name (no prefix): creates branch as-is
+worktree-manager create 003-customers-orders-divorce-2 --raw
+```
+
 ### 3. Work on your feature
 
 ```bash
@@ -99,7 +112,7 @@ This will:
 
 | Command | Alias | Description |
 |---------|-------|-------------|
-| `worktree-manager create <name>` | `wt create` | Create a new worktree |
+| `worktree-manager create <name> [-t TYPE] [--raw]` | `wt create` | Create a new worktree |
 | `worktree-manager list` | `wt list` | List all worktrees |
 | `worktree-manager status` | `wt status` | Show current worktree status |
 | `worktree-manager close` | `wt close` | Close current worktree |

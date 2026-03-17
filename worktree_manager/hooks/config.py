@@ -38,6 +38,10 @@ DEFAULT_CONFIG = {
         'system_notify': {
             'enabled': True,
         },
+        # Lifecycle hooks (worktree create/close)
+        'serena_setup': {
+            'enabled': False,  # Opt-in: set to True to auto-setup Serena for new worktrees
+        },
     },
 }
 

@@ -51,13 +51,13 @@ logger = logging.getLogger('worktree_manager')
 console = Console()
 
 
-def create_worktree_cmd(feature_name: str, branch_type: str = 'feature') -> int:
+def create_worktree_cmd(feature_name: str, branch_type: str | None = 'feature') -> int:
     """
     Create a new worktree with automatic port assignment.
 
     Args:
         feature_name: Name for the feature branch.
-        branch_type: Branch prefix type ('feature' or 'fix').
+        branch_type: Branch prefix type ('feature' or 'fix'). None for raw (no prefix).
 
     Returns:
         Exit code (0 for success, non-zero for failure).
@@ -178,6 +178,24 @@ def create_worktree_cmd(feature_name: str, branch_type: str = 'feature') -> int:
     console.print('Creating task...')
     create_task_for_worktree(feature_name, str(worktree_path))
     console.print('[green]Task created in Kanban board[/green]')
+
+    # Run lifecycle hooks for worktree creation
+    from worktree_manager.hooks import WorktreeLifecycleContext, get_lifecycle_hook_manager
+
+    lifecycle_ctx = WorktreeLifecycleContext(
+        event='create',
+        worktree_path=worktree_path,
+        feature_name=feature_name,
+        main_repo_path=main_repo,
+        branch_name=branch_name,
+    )
+    hook_results = get_lifecycle_hook_manager().execute(lifecycle_ctx)
+
+    for result in hook_results:
+        if result.success:
+            console.print(f'[green]{result.hook_name}: {result.message}[/green]')
+        else:
+            console.print(f'[yellow]{result.hook_name}: {result.message}[/yellow]')
 
     console.print()
     console.print(Panel.fit('[bold green]Worktree Created Successfully![/bold green]', border_style='green'))
@@ -1024,7 +1042,9 @@ def load_db_cmd(
     # Confirm
     if should_prompt():
         console.print()
-        console.print('[yellow]Warning: This will DROP the target database and replace it with production data![/yellow]')
+        console.print(
+            '[yellow]Warning: This will DROP the target database and replace it with production data![/yellow]'
+        )
         response = input('Continue? (y/N): ')
         if response.lower() != 'y':
             console.print('Cancelled.')

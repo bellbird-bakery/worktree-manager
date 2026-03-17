@@ -45,6 +45,18 @@ class TransitionContext:
 
 
 @dataclass
+class WorktreeLifecycleContext:
+    """Context for worktree lifecycle events (create, close)."""
+
+    event: str  # 'create', 'close'
+    worktree_path: Path
+    feature_name: str
+    main_repo_path: Path
+    branch_name: str
+    interactive: bool = True
+
+
+@dataclass
 class HookResult:
     """Result of a hook execution."""
 
@@ -78,6 +90,21 @@ class Hook(Protocol):
         ...
 
     def execute(self, ctx: TransitionContext) -> HookResult:
+        """Execute the hook action."""
+        ...
+
+
+class LifecycleHook(Protocol):
+    """Protocol for worktree lifecycle hook implementations."""
+
+    name: str
+    description: str
+
+    def should_run(self, ctx: WorktreeLifecycleContext) -> bool:
+        """Check if this hook should run for the given lifecycle event."""
+        ...
+
+    def execute(self, ctx: WorktreeLifecycleContext) -> HookResult:
         """Execute the hook action."""
         ...
 
@@ -153,6 +180,65 @@ class HookManager:
         return results
 
 
+class LifecycleHookManager:
+    """Manages lifecycle hook registration and execution for worktree events."""
+
+    def __init__(self) -> None:
+        self._hooks: list[LifecycleHook] = []
+        self._config: HookConfig | None = None
+
+    @property
+    def config(self) -> HookConfig:
+        """Lazy-load configuration."""
+        if self._config is None:
+            from worktree_manager.hooks.config import HookConfig
+
+            self._config = HookConfig.load()
+        return self._config
+
+    def register(self, hook: LifecycleHook) -> None:
+        """Register a lifecycle hook."""
+        self._hooks.append(hook)
+        logger.debug(f'Registered lifecycle hook: {hook.name}')
+
+    def get_hooks_for_event(self, ctx: WorktreeLifecycleContext) -> list[LifecycleHook]:
+        """Get hooks that should run for a lifecycle event."""
+        applicable = []
+        for hook in self._hooks:
+            if not self.config.is_enabled(hook.name):
+                continue
+            if hook.should_run(ctx):
+                applicable.append(hook)
+        return applicable
+
+    def execute(self, ctx: WorktreeLifecycleContext) -> list[HookResult]:
+        """Execute all applicable hooks for the lifecycle event."""
+        results = []
+
+        for hook in self.get_hooks_for_event(ctx):
+            try:
+                result = hook.execute(ctx)
+                result.hook_name = hook.name
+                results.append(result)
+
+                if result.success:
+                    logger.info(f'Lifecycle hook {hook.name} succeeded: {result.message}')
+                else:
+                    logger.warning(f'Lifecycle hook {hook.name} failed: {result.message}')
+
+            except Exception as e:
+                logger.exception(f'Lifecycle hook {hook.name} raised exception')
+                results.append(
+                    HookResult(
+                        success=False,
+                        message=str(e),
+                        hook_name=hook.name,
+                    )
+                )
+
+        return results
+
+
 # Global hook manager instance
 _hook_manager: HookManager | None = None
 
@@ -180,6 +266,28 @@ def _register_default_hooks(manager: HookManager) -> None:
     manager.register(GitCommitHook())
     manager.register(ConsoleNotifyHook())
     manager.register(SystemNotifyHook())
+
+
+# Global lifecycle hook manager instance
+_lifecycle_hook_manager: LifecycleHookManager | None = None
+
+
+def get_lifecycle_hook_manager() -> LifecycleHookManager:
+    """Get the global lifecycle hook manager, initializing hooks if needed."""
+    global _lifecycle_hook_manager
+
+    if _lifecycle_hook_manager is None:
+        _lifecycle_hook_manager = LifecycleHookManager()
+        _register_lifecycle_hooks(_lifecycle_hook_manager)
+
+    return _lifecycle_hook_manager
+
+
+def _register_lifecycle_hooks(manager: LifecycleHookManager) -> None:
+    """Register all lifecycle hooks."""
+    from worktree_manager.hooks.serena import SerenaSetupHook
+
+    manager.register(SerenaSetupHook())
 
 
 def build_context(
@@ -223,10 +331,14 @@ from .config import HookConfig  # noqa: E402
 
 __all__ = [
     'TransitionContext',
+    'WorktreeLifecycleContext',
     'HookResult',
     'Hook',
+    'LifecycleHook',
     'HookManager',
+    'LifecycleHookManager',
     'HookConfig',
     'get_hook_manager',
+    'get_lifecycle_hook_manager',
     'build_context',
 ]

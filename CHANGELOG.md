@@ -4,6 +4,10 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+- **`--raw` flag for `create` command** - Use branch names as-is without `feature/` or `fix/` prefix
+  - `worktree-manager create 003-my-branch --raw` creates branch `003-my-branch` directly
+
 ### Removed
 - **JSON task storage** - Removed `.worktree-tasks.json` file and all JSON synchronization features
   - Deleted `sync.py` module entirely
