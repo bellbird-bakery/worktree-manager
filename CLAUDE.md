@@ -24,7 +24,6 @@ worktree-manager/
 ├── README.md               # User documentation
 ├── CLAUDE.md               # This file
 ├── LICENSE                 # MIT license
-├── tests/                  # Test suite (pytest)
 └── worktree_manager/       # Main package
     ├── __init__.py
     ├── __main__.py         # Entry point for `python -m worktree_manager`
@@ -70,7 +69,6 @@ uv run worktree-manager web      # Start web UI
 # Code quality
 uv run ruff format .             # Format code
 uv run ruff check . --fix        # Lint and fix
-uv run pytest                    # Run tests
 
 # Package management
 uv build                         # Build wheel
@@ -158,11 +156,7 @@ Created per-project with `worktree-manager init`.
 
 ## Testing
 
-```bash
-uv run pytest                    # Run all tests
-uv run pytest -v                 # Verbose
-uv run pytest tests/test_foo.py  # Specific file
-```
+No test suite exists yet. `pytest` and `pytest-asyncio` are declared as optional dev dependencies, but `tests/` is empty — add tests under that path when introducing coverage.
 
 ## Common Tasks
 

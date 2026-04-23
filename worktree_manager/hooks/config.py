@@ -10,6 +10,7 @@ import json
 import logging
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 logger = logging.getLogger('worktree_manager.hooks')
 
@@ -17,7 +18,7 @@ CONFIG_DIR = Path.home() / '.config' / 'dispatch-guru'
 CONFIG_FILE = CONFIG_DIR / 'hooks.json'
 
 # Default configuration
-DEFAULT_CONFIG = {
+DEFAULT_CONFIG: dict[str, Any] = {
     'version': 1,
     'hooks': {
         'docker_start': {
@@ -37,10 +38,6 @@ DEFAULT_CONFIG = {
         },
         'system_notify': {
             'enabled': True,
-        },
-        # Lifecycle hooks (worktree create/close)
-        'serena_setup': {
-            'enabled': False,  # Opt-in: set to True to auto-setup Serena for new worktrees
         },
     },
 }

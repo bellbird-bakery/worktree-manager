@@ -19,6 +19,7 @@ import re
 import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 from . import CONFIG_DIR_NAME, LEGACY_CONFIG_DIR, PROJECT_CONFIG_FILE
 
@@ -31,7 +32,7 @@ CONFIG_FILE = CONFIG_DIR / 'config.json'
 LEGACY_CONFIG_PATH = Path(os.path.expanduser(LEGACY_CONFIG_DIR))
 
 # Default global configuration
-DEFAULT_CONFIG = {
+DEFAULT_CONFIG: dict[str, Any] = {
     'version': 1,
     # Branch patterns to ignore when listing or creating worktrees
     'ignore_patterns': [
@@ -66,7 +67,7 @@ DEFAULT_CONFIG = {
 }
 
 # Default project configuration
-DEFAULT_PROJECT_CONFIG = {
+DEFAULT_PROJECT_CONFIG: dict[str, Any] = {
     'version': 1,
     'project_name': None,  # Auto-detect
     'base_branch': 'develop',
@@ -93,7 +94,7 @@ DEFAULT_PROJECT_CONFIG = {
         'db_base': 5432,
         'range_size': 100,
     },
-    'env_template': '.env.local',
+    'env_template': '.env.example',
     'env_vars_required': [],
     'ignore_patterns': [],
     'hooks': {
@@ -234,7 +235,7 @@ class ProjectConfig:
     services: dict = field(default_factory=dict)
     database: dict = field(default_factory=dict)
     ports: dict = field(default_factory=dict)
-    env_template: str = '.env.local'
+    env_template: str = '.env.example'
     env_vars_required: list[str] = field(default_factory=list)
     ignore_patterns: list[str] = field(default_factory=list)
     hooks: dict = field(default_factory=dict)
@@ -283,7 +284,7 @@ class ProjectConfig:
             services=data.get('services', DEFAULT_PROJECT_CONFIG['services']),
             database=data.get('database', DEFAULT_PROJECT_CONFIG['database']),
             ports=data.get('ports', DEFAULT_PROJECT_CONFIG['ports']),
-            env_template=data.get('env_template', '.env.local'),
+            env_template=data.get('env_template', '.env.example'),
             env_vars_required=data.get('env_vars_required', []),
             ignore_patterns=data.get('ignore_patterns', []),
             hooks=data.get('hooks', {}),

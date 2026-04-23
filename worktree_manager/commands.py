@@ -122,7 +122,10 @@ def create_worktree_cmd(feature_name: str, branch_type: str | None = 'feature') 
 
         # Create .env file
         console.print('Configuring environment...')
-        env_template = worktree_path / '.env.local'
+        from .config import ProjectConfig
+
+        project_config = ProjectConfig.load(repo_path=main_repo)
+        env_template = worktree_path / project_config.env_template
         env_file = worktree_path / '.env'
 
         if env_template.exists():
@@ -159,7 +162,7 @@ def create_worktree_cmd(feature_name: str, branch_type: str | None = 'feature') 
 
             console.print(f'[green]Created .env with ports WEB={ports.web}, DB={ports.db}[/green]')
         else:
-            console.print('[yellow]Warning: .env.local not found. Create .env manually.[/yellow]')
+            console.print(f'[yellow]Warning: {project_config.env_template} not found. Create .env manually.[/yellow]')
 
         # Derive compose project name
         compose_project_name = worktree_path.name.lower().replace(' ', '-').replace('_', '-')
@@ -784,7 +787,6 @@ def setup_cmd() -> int:
 
 
 def config_cmd(
-    show: bool = False,
     add_ignore: str | None = None,
     remove_ignore: str | None = None,
 ) -> int:
@@ -792,7 +794,6 @@ def config_cmd(
     Show or modify configuration.
 
     Args:
-        show: Display current configuration.
         add_ignore: Pattern to add to ignore list.
         remove_ignore: Pattern to remove from ignore list.
 
@@ -1147,10 +1148,6 @@ def prune_missing_worktrees() -> int:
 
     # Remove from registry
     with locked_registry() as reg:
-        if reg is None:
-            console.print('[red]Error: Could not lock registry[/red]')
-            return 1
-
         removed = 0
         for entry in missing:
             # Find and remove by path

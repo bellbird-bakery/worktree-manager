@@ -10,7 +10,7 @@ readme = "README.md"
 license = "MIT"
 requires-python = ">=3.11"
 authors = [
-    { name = "Jeremy", email = "jeremy@example.com" }
+    { name = "Jeremy MacCormack", email = "j.i.maccormack@gmail.com" }
 ]
 keywords = [
     "git",
@@ -57,10 +57,10 @@ worktree-manager = "worktree_manager.cli:main"
 wt = "worktree_manager.cli:main"
 
 [project.urls]
-Homepage = "https://github.com/example/worktree-manager"
-Documentation = "https://github.com/example/worktree-manager#readme"
-Repository = "https://github.com/example/worktree-manager"
-Issues = "https://github.com/example/worktree-manager/issues"
+Homepage = "https://github.com/bellbird-bakery/worktree-manager"
+Documentation = "https://github.com/bellbird-bakery/worktree-manager#readme"
+Repository = "https://github.com/bellbird-bakery/worktree-manager"
+Issues = "https://github.com/bellbird-bakery/worktree-manager/issues"
 
 [tool.hatch.build.targets.wheel]
 packages = ["worktree_manager"]

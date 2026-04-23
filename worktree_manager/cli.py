@@ -133,7 +133,6 @@ def main() -> int:
 
     # config command
     config_parser = subparsers.add_parser('config', help='Show or modify configuration')
-    config_parser.add_argument('--show', action='store_true', help='Show current configuration')
     config_parser.add_argument('--add-ignore', metavar='PATTERN', help='Add branch ignore pattern')
     config_parser.add_argument('--remove-ignore', metavar='PATTERN', help='Remove branch ignore pattern')
 
@@ -196,7 +195,6 @@ def main() -> int:
             return commands.setup_cmd()
         elif args.command == 'config':
             return commands.config_cmd(
-                show=args.show,
                 add_ignore=args.add_ignore,
                 remove_ignore=args.remove_ignore,
             )

@@ -45,3 +45,4 @@ uv.lock
 # Local data
 *.db
 *.sqlite3
+.worktree-tasks.json

@@ -97,7 +97,7 @@ def validate_worktree(worktree_path: str, strict_ports: bool = True) -> Validati
             ValidationResult(
                 name='.env file',
                 passed=False,
-                message='.env file not found. Run: cp .env.local .env',
+                message='.env file not found. Run: cp .env.example .env',
                 is_error=True,
             )
         )
