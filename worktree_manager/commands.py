@@ -46,7 +46,7 @@ from .git_ops import (
     validate_feature_name,
 )
 from .ports import calculate_ports_for_index, validate_ports
-from .registry import WorktreeEntry, locked_registry, read_registry
+from .registry import Registry, WorktreeEntry, locked_registry, read_registry
 from .validator import validate_worktree
 
 logger = logging.getLogger('worktree_manager')
@@ -212,6 +212,98 @@ def create_worktree_cmd(feature_name: str, branch_type: str | None = 'feature') 
     console.print('View tasks: [cyan]worktree-manager web[/cyan]')
     console.print()
 
+    return 0
+
+
+def resolve_worktree(
+    registry: Registry, feature_name: str | None = None, cwd: Path | None = None
+) -> WorktreeEntry | None:
+    """
+    Resolve a worktree entry by feature name, or by walking up from cwd.
+
+    Args:
+        registry: The worktree registry.
+        feature_name: Feature name to look up. Takes precedence over cwd.
+        cwd: Directory to resolve from (may be a subdirectory of a worktree).
+
+    Returns:
+        The matching entry, or None.
+    """
+    if feature_name:
+        return registry.find_by_feature(feature_name)
+
+    if cwd is not None:
+        for candidate in [Path(cwd).resolve(), *Path(cwd).resolve().parents]:
+            entry = registry.find_by_path(str(candidate))
+            if entry:
+                return entry
+
+    return None
+
+
+def build_claude_argv(continue_session: bool = False, extra_args: list[str] | None = None) -> list[str]:
+    """Build the argv for launching a Claude Code session."""
+    argv = ['claude']
+    if continue_session:
+        argv.append('--continue')
+    if extra_args:
+        argv.extend(extra_args)
+    return argv
+
+
+def claude_cmd(
+    feature_name: str | None = None,
+    continue_session: bool = False,
+    extra_args: list[str] | None = None,
+) -> int:
+    """
+    Launch a Claude Code session in a worktree.
+
+    Resolves the worktree by feature name, or from the current directory
+    when no name is given, then replaces this process with `claude` running
+    in the worktree directory.
+
+    Args:
+        feature_name: Feature name of the target worktree.
+        continue_session: Pass --continue to resume the most recent session.
+        extra_args: Additional arguments passed through to claude.
+
+    Returns:
+        Exit code (only on failure; on success the process is replaced).
+    """
+    registry = read_registry()
+    if not registry or not registry.worktrees:
+        console.print('[red]No worktrees registered.[/red]')
+        console.print('Create one with: [cyan]worktree-manager create <feature-name>[/cyan]')
+        return 1
+
+    entry = resolve_worktree(registry, feature_name=feature_name, cwd=Path.cwd())
+    if not entry:
+        if feature_name:
+            console.print(f'[red]No worktree found for feature: {feature_name}[/red]')
+        else:
+            console.print('[red]Not inside a registered worktree. Pass a feature name.[/red]')
+        console.print()
+        console.print('Registered worktrees:')
+        for wt in registry.worktrees:
+            console.print(f'  [cyan]{wt.feature_name}[/cyan] ({wt.path})')
+        return 1
+
+    worktree_path = Path(entry.path)
+    if not worktree_path.is_dir():
+        console.print(f'[red]Worktree directory missing: {worktree_path}[/red]')
+        console.print('Run [cyan]worktree-manager prune[/cyan] to clean up the registry.')
+        return 1
+
+    if not shutil.which('claude'):
+        console.print('[red]claude not found on PATH.[/red]')
+        console.print('Install Claude Code: [cyan]https://code.claude.com/docs/en/setup[/cyan]')
+        return 1
+
+    argv = build_claude_argv(continue_session=continue_session, extra_args=extra_args)
+    console.print(f'Launching Claude Code in [cyan]{worktree_path}[/cyan]')
+    os.chdir(worktree_path)
+    os.execvp(argv[0], argv)
     return 0
 
 

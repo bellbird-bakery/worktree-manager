@@ -33,8 +33,8 @@ def is_quiet() -> bool:
     return CLIContext.quiet
 
 
-def main() -> int:
-    """Main CLI entry point."""
+def build_parser() -> argparse.ArgumentParser:
+    """Build the argument parser."""
     parser = argparse.ArgumentParser(
         prog='worktree-manager',
         description='Git worktree management with Docker Compose isolation',
@@ -154,6 +154,32 @@ def main() -> int:
         help='Migrate from legacy dispatch-guru config',
     )
 
+    # claude command
+    claude_parser = subparsers.add_parser('claude', help='Launch a Claude Code session in a worktree')
+    claude_parser.add_argument(
+        'feature',
+        nargs='?',
+        help='Target worktree feature name (default: current directory)',
+    )
+    claude_parser.add_argument(
+        '-c',
+        '--continue',
+        dest='continue_session',
+        action='store_true',
+        help="Resume the worktree's most recent Claude session (place before the feature name)",
+    )
+    claude_parser.add_argument(
+        'claude_args',
+        nargs=argparse.REMAINDER,
+        help='Everything after the feature name is passed through to claude',
+    )
+
+    return parser
+
+
+def main() -> int:
+    """Main CLI entry point."""
+    parser = build_parser()
     args = parser.parse_args()
 
     # Set global context from flags
@@ -210,6 +236,15 @@ def main() -> int:
             )
         elif args.command == 'init':
             return commands.init_cmd(from_legacy=args.from_legacy)
+        elif args.command == 'claude':
+            extra_args = args.claude_args
+            if extra_args and extra_args[0] == '--':
+                extra_args = extra_args[1:]
+            return commands.claude_cmd(
+                feature_name=args.feature,
+                continue_session=args.continue_session,
+                extra_args=extra_args,
+            )
         else:
             parser.print_help()
             return 1

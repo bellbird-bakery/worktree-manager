@@ -39,6 +39,10 @@ DEFAULT_CONFIG: dict[str, Any] = {
         'system_notify': {
             'enabled': True,
         },
+        'claude_launch': {
+            'enabled': True,
+            'auto_launch': False,
+        },
     },
 }
 

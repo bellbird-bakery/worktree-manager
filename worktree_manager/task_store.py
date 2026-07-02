@@ -134,12 +134,8 @@ class Task:
     @classmethod
     def from_dict(cls, feature_name: str, data: dict) -> Task:
         """Create Task from dictionary."""
-        created_at = (
-            parse_timestamp(data.get('created_at', '')) if data.get('created_at') else datetime.now(UTC)
-        )
-        updated_at = (
-            parse_timestamp(data.get('updated_at', '')) if data.get('updated_at') else datetime.now(UTC)
-        )
+        created_at = parse_timestamp(data.get('created_at', '')) if data.get('created_at') else datetime.now(UTC)
+        updated_at = parse_timestamp(data.get('updated_at', '')) if data.get('updated_at') else datetime.now(UTC)
 
         return cls(
             feature_name=feature_name,

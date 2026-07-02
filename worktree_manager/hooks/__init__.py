@@ -278,8 +278,16 @@ def get_lifecycle_hook_manager() -> LifecycleHookManager:
 
     if _lifecycle_hook_manager is None:
         _lifecycle_hook_manager = LifecycleHookManager()
+        _register_default_lifecycle_hooks(_lifecycle_hook_manager)
 
     return _lifecycle_hook_manager
+
+
+def _register_default_lifecycle_hooks(manager: LifecycleHookManager) -> None:
+    """Register all default lifecycle hooks."""
+    from worktree_manager.hooks.claude import ClaudeLaunchHook
+
+    manager.register(ClaudeLaunchHook())
 
 
 def build_context(

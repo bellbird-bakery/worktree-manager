@@ -116,6 +116,7 @@ This will:
 | `worktree-manager list` | `wt list` | List all worktrees |
 | `worktree-manager status` | `wt status` | Show current worktree status |
 | `worktree-manager close` | `wt close` | Close current worktree |
+| `worktree-manager claude [name] [-c]` | `wt claude` | Launch a Claude Code session in a worktree |
 | `worktree-manager clone-db <index>` | | Clone database from another worktree |
 | `worktree-manager cleanup-orphans` | | Clean up orphaned Docker resources |
 | `worktree-manager web [--port PORT]` | | Start the Kanban web interface |
@@ -123,6 +124,19 @@ This will:
 | `worktree-manager setup` | | Run interactive setup wizard |
 | `worktree-manager config` | | Show or modify configuration |
 | `worktree-manager init` | | Initialize project configuration |
+
+### Claude Code Sessions
+
+`wt claude` opens a [Claude Code](https://code.claude.com) session in a worktree, so each feature environment gets its own isolated session:
+
+```bash
+wt claude my-feature          # Launch claude in the my-feature worktree
+wt claude                     # Launch in the worktree containing the current directory
+wt claude -c my-feature       # Resume the worktree's most recent session
+wt claude my-feature -p "run the tests"   # Args after the name are passed through to claude
+```
+
+After `wt create`, the `claude_launch` hook prints the matching `wt claude` command. Set `auto_launch: true` for `claude_launch` in `~/.config/dispatch-guru/hooks.json` to instead open the session automatically in a new tmux window (requires an active tmux session).
 
 ### Global Options
 
