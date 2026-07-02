@@ -89,6 +89,8 @@ DEFAULT_PROJECT_CONFIG: dict[str, Any] = {
         'user': None,
         'password_env_var': 'POSTGRES_PASSWORD',
     },
+    # Production DB restore script, relative to the main repo root (or absolute)
+    'db_restore_script': 'database_tools/update_local_restore.sh',
     'ports': {
         'web_base': 58000,
         'db_base': 5432,
@@ -234,6 +236,7 @@ class ProjectConfig:
     compose_file: str = 'docker-compose.local.yml'
     services: dict = field(default_factory=dict)
     database: dict = field(default_factory=dict)
+    db_restore_script: str = 'database_tools/update_local_restore.sh'
     ports: dict = field(default_factory=dict)
     env_template: str = '.env.example'
     env_vars_required: list[str] = field(default_factory=list)
@@ -283,6 +286,7 @@ class ProjectConfig:
             compose_file=data.get('compose_file', 'docker-compose.local.yml'),
             services=data.get('services', DEFAULT_PROJECT_CONFIG['services']),
             database=data.get('database', DEFAULT_PROJECT_CONFIG['database']),
+            db_restore_script=data.get('db_restore_script', DEFAULT_PROJECT_CONFIG['db_restore_script']),
             ports=data.get('ports', DEFAULT_PROJECT_CONFIG['ports']),
             env_template=data.get('env_template', '.env.example'),
             env_vars_required=data.get('env_vars_required', []),
@@ -304,6 +308,7 @@ class ProjectConfig:
             'compose_file': self.compose_file,
             'services': self.services,
             'database': self.database,
+            'db_restore_script': self.db_restore_script,
             'ports': self.ports,
             'env_template': self.env_template,
             'env_vars_required': self.env_vars_required,
@@ -316,6 +321,17 @@ class ProjectConfig:
             json.dump(data, f, indent=2)
 
         logger.info(f'Saved project config to {config_file}')
+
+    def get_db_restore_script(self, main_repo_path: Path | str) -> Path:
+        """
+        Resolve the production DB restore script path.
+
+        Relative paths are resolved against the main repository root.
+        """
+        script = Path(self.db_restore_script).expanduser()
+        if script.is_absolute():
+            return script
+        return Path(main_repo_path) / script
 
     def get_db_service_name(self) -> str:
         """Get the database service name."""

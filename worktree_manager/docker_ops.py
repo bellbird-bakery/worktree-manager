@@ -353,22 +353,6 @@ def list_project_networks(project_name: str | None = None) -> list[DockerNetwork
         return []
 
 
-# Legacy aliases for backwards compatibility
-def list_dispatch_guru_volumes() -> list[DockerVolume]:
-    """Legacy alias for list_project_volumes. Use list_project_volumes instead."""
-    return list_project_volumes('dispatch-guru')
-
-
-def list_dispatch_guru_containers() -> list[DockerContainer]:
-    """Legacy alias for list_project_containers. Use list_project_containers instead."""
-    return list_project_containers('dispatch-guru')
-
-
-def list_dispatch_guru_networks() -> list[DockerNetwork]:
-    """Legacy alias for list_project_networks. Use list_project_networks instead."""
-    return list_project_networks('dispatch-guru')
-
-
 def remove_container(name: str, force: bool = True) -> bool:
     """Remove a Docker container."""
     cmd = ['docker', 'rm']
@@ -399,5 +383,3 @@ def remove_network(name: str) -> bool:
         return True
     except subprocess.CalledProcessError:
         return False
-
-

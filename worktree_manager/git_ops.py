@@ -11,6 +11,9 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
+# Directory (and Docker Compose project) name prefix for managed worktrees
+WORKTREE_PREFIX = 'wt-'
+
 
 class GitError(Exception):
     """Error from git operations."""
@@ -181,7 +184,7 @@ def create_worktree(
     """
     main_repo = Path(repo_path) if repo_path else get_main_repo_root()
     branch_name = f'{branch_type}/{feature_name}' if branch_type else feature_name
-    worktree_dir = f'wt-{feature_name}'
+    worktree_dir = f'{WORKTREE_PREFIX}{feature_name}'
     worktree_path = main_repo.parent / worktree_dir
 
     # Check if worktree directory already exists

@@ -75,7 +75,7 @@ def main() -> int:
         '--type',
         choices=['feature', 'fix'],
         default='feature',
-        help="Branch type prefix (default: feature)",
+        help='Branch type prefix (default: feature)',
     )
     create_parser.add_argument(
         '--raw',
@@ -92,9 +92,19 @@ def main() -> int:
     # close command
     close_parser = subparsers.add_parser('close', help='Close a worktree')
     close_parser.add_argument('message', help='Commit message')
+    close_parser.add_argument(
+        '--keep-volumes',
+        action='store_true',
+        help='Keep Docker volumes instead of removing them with the containers',
+    )
 
     # cleanup-orphans command
-    subparsers.add_parser('cleanup-orphans', help='Clean up orphaned resources')
+    cleanup_parser = subparsers.add_parser('cleanup-orphans', help='Clean up orphaned resources')
+    cleanup_parser.add_argument(
+        '--dry-run',
+        action='store_true',
+        help='List orphaned resources without deleting anything',
+    )
 
     # prune command
     subparsers.add_parser('prune', help='Remove worktrees from registry that no longer exist on disk')
@@ -174,9 +184,9 @@ def main() -> int:
         elif args.command == 'status':
             return commands.show_status()
         elif args.command == 'close':
-            return commands.close_worktree(args.message)
+            return commands.close_worktree(args.message, keep_volumes=args.keep_volumes)
         elif args.command == 'cleanup-orphans':
-            return commands.cleanup_orphans()
+            return commands.cleanup_orphans(dry_run=args.dry_run)
         elif args.command == 'prune':
             return commands.prune_missing_worktrees()
         elif args.command == 'load-db':

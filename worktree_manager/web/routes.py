@@ -537,9 +537,9 @@ async def worktree_close(request: Request) -> Response:
         except Exception as e:
             errors.append(f'Permission fix warning: {e}')
 
-        # Step 2: Stop containers
+        # Step 2: Stop containers and remove their volumes (the worktree DB is disposable)
         try:
-            compose_down(worktree_path, entry.compose_project_name, volumes=False)
+            compose_down(worktree_path, entry.compose_project_name, volumes=True)
         except Exception as e:
             errors.append(f'Container stop warning: {e}')
 
@@ -582,18 +582,22 @@ async def worktree_close(request: Request) -> Response:
 # Load Database Routes
 # ==============================================================================
 
-# Production restore script path and dumps directory
-PROD_RESTORE_SCRIPT = Path('/home/jeremy/projects/dispatch-guru/database_tools/update_local_restore.sh')
-PROD_DUMPS_DIR = Path('/home/jeremy/projects/dispatch-guru/database_tools/dumps')
+
+def get_prod_restore_script(registry) -> Path:
+    """Resolve the production restore script from project config and the main repo root."""
+    from ..config import get_project_config
+
+    config = get_project_config(registry.main_repo_path)
+    return config.get_db_restore_script(registry.main_repo_path)
 
 
-def get_latest_prod_dump() -> dict | None:
+def get_latest_prod_dump(dumps_dir: Path) -> dict | None:
     """Find the latest production database dump and return its info."""
-    if not PROD_DUMPS_DIR.exists():
+    if not dumps_dir.exists():
         return None
 
     # Find all prod_dump files
-    dumps = list(PROD_DUMPS_DIR.glob('prod_dump-*.psql'))
+    dumps = list(dumps_dir.glob('prod_dump-*.psql'))
     if not dumps:
         return None
 
@@ -627,10 +631,11 @@ async def load_db_form(request: Request) -> Response:
         return RedirectResponse('/worktrees/', status_code=302)
 
     # Check if script exists
-    script_exists = PROD_RESTORE_SCRIPT.exists()
+    restore_script = get_prod_restore_script(registry)
+    script_exists = restore_script.exists()
 
     # Get latest cached dump info
-    latest_dump = get_latest_prod_dump()
+    latest_dump = get_latest_prod_dump(restore_script.parent / 'dumps')
 
     # Check if postgres container is running
     containers = compose_ps(target.path, target.compose_project_name)
@@ -643,7 +648,7 @@ async def load_db_form(request: Request) -> Response:
         {
             'target': target,
             'script_exists': script_exists,
-            'script_path': str(PROD_RESTORE_SCRIPT),
+            'script_path': str(restore_script),
             'docker_running': is_docker_running(),
             'db_running': db_running,
             'latest_dump': latest_dump,
@@ -664,9 +669,10 @@ async def load_db_action(request: Request) -> Response:
     if not target:
         return JSONResponse({'error': f'Target worktree "{target_feature}" not found'}, status_code=404)
 
-    if not PROD_RESTORE_SCRIPT.exists():
+    restore_script = get_prod_restore_script(registry)
+    if not restore_script.exists():
         return JSONResponse(
-            {'error': f'Database load script not found at {PROD_RESTORE_SCRIPT}'},
+            {'error': f'Database load script not found at {restore_script}'},
             status_code=500,
         )
 
@@ -698,9 +704,9 @@ async def load_db_action(request: Request) -> Response:
         # Run in thread executor since subprocess.run is blocking
         result = await asyncio.to_thread(
             subprocess.run,
-            [str(PROD_RESTORE_SCRIPT)] + flags,
+            [str(restore_script)] + flags,
             env=env,
-            cwd=PROD_RESTORE_SCRIPT.parent,
+            cwd=restore_script.parent,
             input='y\n',  # Auto-confirm the "Continue? (y/N)" prompt
             capture_output=True,
             text=True,
@@ -713,9 +719,7 @@ async def load_db_action(request: Request) -> Response:
             lines = text.splitlines()
             if len(lines) <= head + tail:
                 return text
-            return '\n'.join(
-                lines[:head] + [f'\n... ({len(lines) - head - tail} lines omitted) ...\n'] + lines[-tail:]
-            )
+            return '\n'.join(lines[:head] + [f'\n... ({len(lines) - head - tail} lines omitted) ...\n'] + lines[-tail:])
 
         if result.returncode == 0:
             return JSONResponse(

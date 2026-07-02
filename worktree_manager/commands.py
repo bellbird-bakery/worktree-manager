@@ -22,15 +22,17 @@ from .docker_ops import (
     compose_down,
     compose_ps,
     fix_permissions,
+    get_compose_project_name,
     is_docker_running,
-    list_dispatch_guru_containers,
-    list_dispatch_guru_networks,
-    list_dispatch_guru_volumes,
+    list_project_containers,
+    list_project_networks,
+    list_project_volumes,
     remove_container,
     remove_network,
     remove_volume,
 )
 from .git_ops import (
+    WORKTREE_PREFIX,
     GitError,
     commit_all,
     create_worktree,
@@ -333,22 +335,25 @@ def show_status() -> int:
     return 0
 
 
-def close_worktree(message: str) -> int:
+def close_worktree(message: str, keep_volumes: bool = False) -> int:
     """
     Close the current worktree.
 
     This will:
     1. Commit any uncommitted changes
-    2. Stop Docker containers
+    2. Stop Docker containers and remove their volumes
     3. Remove the git worktree
     4. Remove from registry
 
     Args:
         message: Commit message for any uncommitted changes.
+        keep_volumes: Keep the worktree's Docker volumes instead of removing them.
 
     Returns:
         Exit code (0 for success).
     """
+    from .cli import should_prompt
+
     console.print()
     console.print(Panel.fit('[bold]Closing Worktree[/bold]', border_style='yellow'))
     console.print()
@@ -379,12 +384,15 @@ def close_worktree(message: str) -> int:
     # Confirm
     console.print('[yellow]This will:[/yellow]')
     console.print('  - Commit any uncommitted changes')
-    console.print('  - Stop Docker containers')
+    if keep_volumes:
+        console.print('  - Stop Docker containers (keeping volumes)')
+    else:
+        console.print('  - Stop Docker containers and remove their volumes')
     console.print('  - Remove the worktree directory')
     console.print('  - Remove from registry')
     console.print()
 
-    if not console.input('Continue? (yes/no): ').lower() == 'yes':
+    if should_prompt() and not console.input('Continue? (yes/no): ').lower() == 'yes':
         console.print('Cancelled.')
         return 0
 
@@ -411,8 +419,18 @@ def close_worktree(message: str) -> int:
 
         console.print('Stopping containers...')
         try:
-            compose_down(current_path, entry.compose_project_name, volumes=False)
-            console.print('[green]Containers stopped[/green]')
+            compose_down(current_path, entry.compose_project_name, volumes=not keep_volumes)
+            if keep_volumes:
+                console.print('[green]Containers stopped (volumes kept)[/green]')
+                leftover = list_project_volumes(entry.compose_project_name)
+                if leftover:
+                    names = ' '.join(v.name for v in leftover)
+                    console.print('[yellow]Kept volumes:[/yellow]')
+                    for v in leftover:
+                        console.print(f'  - {v.name}')
+                    console.print(f'[dim]Remove them later with: docker volume rm {names}[/dim]')
+            else:
+                console.print('[green]Containers stopped and volumes removed[/green]')
         except DockerError as e:
             console.print(f'[yellow]Warning: {e}[/yellow]')
 
@@ -450,13 +468,19 @@ def close_worktree(message: str) -> int:
     return 0
 
 
-def cleanup_orphans() -> int:
+def cleanup_orphans(dry_run: bool = False) -> int:
     """
     Clean up orphaned Docker resources and registry entries.
+
+    Args:
+        dry_run: Only report orphans, never delete anything.
 
     Returns:
         Exit code (0 for success).
     """
+    from .cli import should_prompt
+    from .config import get_project_config
+
     console.print()
     console.print(Panel.fit('[bold]Orphan Cleanup[/bold]', border_style='yellow'))
     console.print()
@@ -466,37 +490,38 @@ def cleanup_orphans() -> int:
         console.print('[yellow]No registry found. Nothing to clean up.[/yellow]')
         return 0
 
-    registered_projects = {wt.compose_project_name for wt in registry.worktrees}
+    project_name = get_project_config(registry.main_repo_path).project_name
+    git_worktrees = {wt.path for wt in list_worktrees(registry.main_repo_path)}
 
-    # Find orphaned resources
-    orphaned_volumes = []
-    orphaned_containers = []
-    orphaned_networks = []
-    orphaned_entries = []
+    # Resources are protected if they belong to the main checkout, a registered
+    # worktree, or any git worktree still on disk (even if missing from the
+    # registry) — never offer those for deletion, regardless of registry state.
+    protected_projects = {wt.compose_project_name for wt in registry.worktrees}
+    protected_projects.update({get_compose_project_name(registry.main_repo_path), project_name})
+    protected_projects.update(get_compose_project_name(path) for path in git_worktrees)
+
+    def scan_orphans(list_resources):
+        # Worktree resources are named wt-<feature>_* and don't contain the
+        # project name, so scan both patterns and dedupe by resource name.
+        by_name = {}
+        for resource in [*list_resources(project_name), *list_resources(WORKTREE_PREFIX)]:
+            by_name.setdefault(resource.name, resource)
+        return [
+            r
+            for r in by_name.values()
+            if r.project_name
+            and r.project_name not in protected_projects
+            and (r.project_name.startswith(WORKTREE_PREFIX) or project_name.lower() in r.project_name.lower())
+        ]
 
     console.print('Scanning for orphaned resources...')
     console.print()
 
-    # Check volumes
-    for volume in list_dispatch_guru_volumes():
-        if volume.project_name and volume.project_name not in registered_projects:
-            orphaned_volumes.append(volume)
-
-    # Check containers
-    for container in list_dispatch_guru_containers():
-        if container.project_name and container.project_name not in registered_projects:
-            orphaned_containers.append(container)
-
-    # Check networks
-    for network in list_dispatch_guru_networks():
-        if network.project_name and network.project_name not in registered_projects:
-            orphaned_networks.append(network)
-
+    orphaned_volumes = scan_orphans(list_project_volumes)
+    orphaned_containers = scan_orphans(list_project_containers)
+    orphaned_networks = scan_orphans(list_project_networks)
     # Check registry entries (paths that don't exist)
-    git_worktrees = {wt.path for wt in list_worktrees(registry.main_repo_path)}
-    for entry in registry.worktrees:
-        if entry.path not in git_worktrees:
-            orphaned_entries.append(entry)
+    orphaned_entries = [entry for entry in registry.worktrees if entry.path not in git_worktrees]
 
     total = len(orphaned_volumes) + len(orphaned_containers) + len(orphaned_networks) + len(orphaned_entries)
 
@@ -531,10 +556,15 @@ def cleanup_orphans() -> int:
             console.print(f'  - {e.compose_project_name} (path: {e.path})')
         console.print()
 
+    if dry_run:
+        console.print('[dim]Dry run: nothing was deleted. Re-run without --dry-run to clean up.[/dim]')
+        console.print()
+        return 0
+
     # Confirm
     console.print('[red]WARNING: This will permanently delete these resources![/red]')
     console.print()
-    if not console.input('Continue with cleanup? (yes/no): ').lower() == 'yes':
+    if should_prompt() and not console.input('Continue with cleanup? (yes/no): ').lower() == 'yes':
         console.print('Cancelled.')
         return 0
 
@@ -954,10 +984,6 @@ def init_cmd(from_legacy: bool = False) -> int:
     return 0
 
 
-# Path to production restore script
-PROD_RESTORE_SCRIPT = Path('/home/jeremy/projects/dispatch-guru/database_tools/update_local_restore.sh')
-
-
 def load_db_cmd(
     feature_name: str | None = None,
     do_dump: bool = False,
@@ -975,6 +1001,7 @@ def load_db_cmd(
         Exit code (0 for success).
     """
     from .cli import should_prompt
+    from .config import get_project_config
 
     console.print()
     console.print(Panel.fit('[bold]Load Database[/bold]', border_style='blue'))
@@ -985,6 +1012,9 @@ def load_db_cmd(
     if not registry:
         console.print('[red]Error: No worktree registry found[/red]')
         return 1
+
+    project_config = get_project_config(registry.main_repo_path)
+    restore_script = project_config.get_db_restore_script(registry.main_repo_path)
 
     # Find target worktree
     if feature_name:
@@ -1014,8 +1044,9 @@ def load_db_cmd(
         console.print('[red]Error: Docker is not running[/red]')
         return 1
 
-    if not PROD_RESTORE_SCRIPT.exists():
-        console.print(f'[red]Error: Restore script not found at {PROD_RESTORE_SCRIPT}[/red]')
+    if not restore_script.exists():
+        console.print(f'[red]Error: Restore script not found at {restore_script}[/red]')
+        console.print('[dim]Set "db_restore_script" in .worktree-manager.json to point at your restore script.[/dim]')
         return 1
 
     # Check if postgres container is running
@@ -1024,7 +1055,7 @@ def load_db_cmd(
     db_running = any(c.status.lower() == 'running' for c in db_containers)
     if not db_running:
         console.print('[red]Error: Database container is not running[/red]')
-        console.print('[dim]Start the worktree containers first with: wt open[/dim]')
+        console.print(f'[dim]Start the worktree containers first: cd {target.path} && just up[/dim]')
         return 1
 
     # Build flags - by default we skip dump and backup for speed
@@ -1063,9 +1094,9 @@ def load_db_cmd(
     # Run script
     try:
         result = subprocess.run(
-            [str(PROD_RESTORE_SCRIPT)] + flags,
+            [str(restore_script)] + flags,
             env=env,
-            cwd=PROD_RESTORE_SCRIPT.parent,
+            cwd=restore_script.parent,
             input='y\n',  # Auto-confirm the script's prompt
             capture_output=False,  # Stream output directly
             text=True,
