@@ -15,7 +15,7 @@ import subprocess
 import time
 from dataclasses import dataclass
 
-from . import BASE_DB_PORT, BASE_WEB_PORT
+from . import BASE_DB_PORT, BASE_REDIS_PORT, BASE_WEB_PORT
 from .registry import (
     PORT_RETRY_ATTEMPTS,
     PORT_RETRY_DELAY,
@@ -33,7 +33,7 @@ class PortConflict:
     """Information about a port conflict."""
 
     port: int
-    port_type: str  # 'web' or 'db'
+    port_type: str  # 'web', 'db', or 'redis'
     process_name: str | None = None
     process_pid: int | None = None
 
@@ -81,7 +81,7 @@ def is_port_in_use(port: int) -> tuple[bool, str | None, int | None]:
     return (True, process_name, process_pid)
 
 
-def check_port_conflicts(web_port: int, db_port: int) -> list[PortConflict]:
+def check_port_conflicts(web_port: int, db_port: int, redis_port: int | None = None) -> list[PortConflict]:
     """
     Check for port conflicts with the given ports.
 
@@ -100,16 +100,27 @@ def check_port_conflicts(web_port: int, db_port: int) -> list[PortConflict]:
     if in_use:
         conflicts.append(PortConflict(port=db_port, port_type='db', process_name=proc_name, process_pid=proc_pid))
 
+    # Check redis port
+    if redis_port is not None:
+        in_use, proc_name, proc_pid = is_port_in_use(redis_port)
+        if in_use:
+            conflicts.append(
+                PortConflict(port=redis_port, port_type='redis', process_name=proc_name, process_pid=proc_pid)
+            )
+
     return conflicts
 
 
-def check_registry_conflicts(web_port: int, db_port: int, exclude_path: str | None = None) -> list[PortConflict]:
+def check_registry_conflicts(
+    web_port: int, db_port: int, redis_port: int | None = None, exclude_path: str | None = None
+) -> list[PortConflict]:
     """
     Check if ports conflict with other registered worktrees.
 
     Args:
         web_port: Web port to check
         db_port: Database port to check
+        redis_port: Redis port to check (None to skip)
         exclude_path: Optional path to exclude from conflict check (for current worktree)
 
     Returns:
@@ -143,6 +154,16 @@ def check_registry_conflicts(web_port: int, db_port: int, exclude_path: str | No
                 )
             )
 
+        # wt.ports.redis is 0 for legacy entries created before REDIS_PORT allocation; skip those.
+        if redis_port is not None and wt.ports.redis and wt.ports.redis == redis_port:
+            conflicts.append(
+                PortConflict(
+                    port=redis_port,
+                    port_type='redis',
+                    process_name=f'worktree:{wt.feature_name}',
+                )
+            )
+
     return conflicts
 
 
@@ -154,11 +175,12 @@ def calculate_ports_for_index(index: int) -> WorktreePorts:
     Index 1+ get offset ports.
     """
     if index == 0:
-        return WorktreePorts(web=BASE_WEB_PORT, db=BASE_DB_PORT)
+        return WorktreePorts(web=BASE_WEB_PORT, db=BASE_DB_PORT, redis=BASE_REDIS_PORT)
 
     return WorktreePorts(
         web=BASE_WEB_PORT + index,
         db=BASE_DB_PORT + index,
+        redis=BASE_REDIS_PORT + index,
     )
 
 
@@ -175,21 +197,24 @@ def get_available_ports(registry: Registry) -> WorktreePorts:
     return calculate_ports_for_index(next_index)
 
 
-def validate_ports(web_port: int, db_port: int, exclude_path: str | None = None) -> list[PortConflict]:
+def validate_ports(
+    web_port: int, db_port: int, redis_port: int | None = None, exclude_path: str | None = None
+) -> list[PortConflict]:
     """
     Validate that ports are available (not in use and not conflicting with registry).
 
     Args:
         web_port: Web port to validate
         db_port: Database port to validate
+        redis_port: Redis port to validate (None to skip)
         exclude_path: Optional path to exclude from registry conflict check
 
     Returns:
         Combined list of all conflicts found.
     """
     conflicts = []
-    conflicts.extend(check_port_conflicts(web_port, db_port))
-    conflicts.extend(check_registry_conflicts(web_port, db_port, exclude_path))
+    conflicts.extend(check_port_conflicts(web_port, db_port, redis_port))
+    conflicts.extend(check_registry_conflicts(web_port, db_port, redis_port, exclude_path))
     return conflicts
 
 
@@ -229,16 +254,16 @@ def allocate_ports_atomic(
                 ports = calculate_ports_for_index(next_index)
 
                 # Check if ports are actually available (inside lock!)
-                conflicts = check_port_conflicts(ports.web, ports.db)
+                conflicts = check_port_conflicts(ports.web, ports.db, ports.redis)
 
                 if conflicts:
                     # Ports in use by system - try next index
-                    logger.warning(f'Ports {ports.web}/{ports.db} in use, trying next index')
+                    logger.warning(f'Ports {ports.web}/{ports.db}/{ports.redis} in use, trying next index')
                     # Find an index with free ports
                     for offset in range(1, 100):
                         test_index = next_index + offset
                         test_ports = calculate_ports_for_index(test_index)
-                        test_conflicts = check_port_conflicts(test_ports.web, test_ports.db)
+                        test_conflicts = check_port_conflicts(test_ports.web, test_ports.db, test_ports.redis)
                         if not test_conflicts:
                             ports = test_ports
                             next_index = test_index
@@ -247,15 +272,17 @@ def allocate_ports_atomic(
                         raise PortAllocationError('Could not find available ports in range')
 
                 # Double-check registry conflicts (should not happen if locking works)
-                registry_conflicts = check_registry_conflicts(ports.web, ports.db, exclude_path=None)
+                registry_conflicts = check_registry_conflicts(ports.web, ports.db, ports.redis, exclude_path=None)
                 if registry_conflicts:
                     # This shouldn't happen if locking is working correctly
                     logger.error(f'Registry conflict detected despite holding lock: {registry_conflicts}')
-                    raise PortAllocationError(f'Registry conflict for ports {ports.web}/{ports.db}')
+                    raise PortAllocationError(f'Registry conflict for ports {ports.web}/{ports.db}/{ports.redis}')
 
                 # Ports are available - allocation successful
                 # Note: The actual worktree entry is added by the caller
-                logger.info(f'Allocated ports web={ports.web}, db={ports.db} at index {next_index}')
+                logger.info(
+                    f'Allocated ports web={ports.web}, db={ports.db}, redis={ports.redis} at index {next_index}'
+                )
                 return ports, next_index
 
         except PortAllocationError as e:
@@ -290,12 +317,12 @@ def find_available_ports_in_range(
         ports = calculate_ports_for_index(index)
 
         # Check system port usage
-        system_conflicts = check_port_conflicts(ports.web, ports.db)
+        system_conflicts = check_port_conflicts(ports.web, ports.db, ports.redis)
         if system_conflicts:
             continue
 
         # Check registry conflicts
-        registry_conflicts = check_registry_conflicts(ports.web, ports.db)
+        registry_conflicts = check_registry_conflicts(ports.web, ports.db, ports.redis)
         if registry_conflicts:
             continue
 

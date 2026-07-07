@@ -17,6 +17,7 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
+from . import BASE_REDIS_PORT
 from .docker_ops import (
     DockerError,
     compose_down,
@@ -45,7 +46,7 @@ from .git_ops import (
     remove_worktree,
     validate_feature_name,
 )
-from .ports import calculate_ports_for_index, validate_ports
+from .ports import calculate_ports_for_index, is_port_in_use, validate_ports
 from .registry import Registry, WorktreeEntry, locked_registry, read_registry
 from .validator import validate_worktree
 
@@ -98,11 +99,13 @@ def create_worktree_cmd(feature_name: str, branch_type: str | None = 'feature') 
 
         console.print(f'Feature: [cyan]{feature_name}[/cyan]')
         console.print(f'Index: [cyan]{next_index}[/cyan]')
-        console.print(f'Ports: WEB=[cyan]{ports.web}[/cyan], DB=[cyan]{ports.db}[/cyan]')
+        console.print(
+            f'Ports: WEB=[cyan]{ports.web}[/cyan], DB=[cyan]{ports.db}[/cyan], REDIS=[cyan]{ports.redis}[/cyan]'
+        )
         console.print()
 
         # Check for port conflicts
-        conflicts = validate_ports(ports.web, ports.db)
+        conflicts = validate_ports(ports.web, ports.db, ports.redis)
         if conflicts:
             console.print('[red]Port conflicts detected:[/red]')
             for conflict in conflicts:
@@ -151,6 +154,11 @@ def create_worktree_cmd(feature_name: str, branch_type: str | None = 'feature') 
             else:
                 content += f'DB_PORT={ports.db}\n'
 
+            if 'REDIS_PORT=' in content:
+                content = re.sub(r'REDIS_PORT=\d+', f'REDIS_PORT={ports.redis}', content)
+            else:
+                content += f'REDIS_PORT={ports.redis}\n'
+
             # Add UID/GID for non-root Docker containers
             uid = os.getuid()
             gid = os.getgid()
@@ -162,7 +170,7 @@ def create_worktree_cmd(feature_name: str, branch_type: str | None = 'feature') 
             with open(env_file, 'w') as f:
                 f.write(content)
 
-            console.print(f'[green]Created .env with ports WEB={ports.web}, DB={ports.db}[/green]')
+            console.print(f'[green]Created .env with ports WEB={ports.web}, DB={ports.db}, REDIS={ports.redis}[/green]')
         else:
             console.print(f'[yellow]Warning: {project_config.env_template} not found. Create .env manually.[/yellow]')
 
@@ -212,6 +220,79 @@ def create_worktree_cmd(feature_name: str, branch_type: str | None = 'feature') 
     console.print('View tasks: [cyan]worktree-manager web[/cyan]')
     console.print()
 
+    return 0
+
+
+def _write_env_port(env_file: Path, key: str, value: int) -> None:
+    """Set or replace ``KEY=value`` in a worktree .env file, creating it if needed."""
+    import re
+
+    content = env_file.read_text() if env_file.exists() else ''
+    if f'{key}=' in content:
+        content = re.sub(rf'{key}=\d+', f'{key}={value}', content)
+    else:
+        if content and not content.endswith('\n'):
+            content += '\n'
+        content += f'{key}={value}\n'
+    env_file.write_text(content)
+
+
+def backfill_redis_ports_cmd(dry_run: bool = False) -> int:
+    """
+    Assign a unique REDIS_PORT to existing worktrees created before Redis port allocation.
+
+    For each registered worktree whose stored redis port is unset (0), allocate a unique
+    port (base 6379 + index, or the next free port) and write REDIS_PORT into its .env.
+    """
+    console.print()
+    console.print(Panel.fit('[bold]Backfilling REDIS_PORT[/bold]', border_style='blue'))
+    console.print()
+
+    try:
+        main_repo = get_main_repo_root()
+    except GitError as e:
+        console.print(f'[red]Error: {e}[/red]')
+        return 1
+
+    with locked_registry(str(main_repo)) as registry:
+        # Ports already claimed by worktrees that have a redis port set.
+        used = {wt.ports.redis for wt in registry.worktrees if wt.ports.redis}
+        missing = [wt for wt in registry.worktrees if not wt.ports.redis]
+
+        if not missing:
+            console.print('[green]All worktrees already have a REDIS_PORT. Nothing to do.[/green]')
+            return 0
+
+        for wt in missing:
+            candidate = BASE_REDIS_PORT + wt.index
+            # Skip ports already claimed by another worktree or in use on the host.
+            while candidate in used or is_port_in_use(candidate)[0]:
+                candidate += 1
+            used.add(candidate)
+
+            env_file = Path(wt.path) / '.env'
+            console.print(f'  [cyan]{wt.feature_name}[/cyan] (index {wt.index}) -> REDIS_PORT={candidate}')
+
+            if dry_run:
+                continue
+
+            wt.ports.redis = candidate
+            try:
+                _write_env_port(env_file, 'REDIS_PORT', candidate)
+            except OSError as e:
+                console.print(f'    [yellow]Warning: could not update {env_file}: {e}[/yellow]')
+
+        if dry_run:
+            console.print()
+            console.print('[yellow]Dry run - no changes written.[/yellow]')
+            # Discard in-memory changes so the lock's write-back is a no-op relative to on-disk.
+            # (redis ports were never mutated in dry-run, so nothing to revert.)
+
+    console.print()
+    if dry_run:
+        console.print(f'[bold]{len(missing)} worktree(s) would be updated.[/bold]')
+    else:
+        console.print(f'[bold green]Backfilled REDIS_PORT for {len(missing)} worktree(s).[/bold green]')
     return 0
 
 

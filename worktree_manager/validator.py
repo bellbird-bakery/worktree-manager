@@ -137,14 +137,29 @@ def validate_worktree(worktree_path: str, strict_ports: bool = True) -> Validati
     else:
         report.add(ValidationResult(name='DB_PORT', passed=True, message=f'DB_PORT set: {db_port}'))
 
+    # Check 3b: REDIS_PORT is set
+    redis_port = env_vars.get('REDIS_PORT')
+    if not redis_port:
+        report.add(
+            ValidationResult(
+                name='REDIS_PORT',
+                passed=False,
+                message='REDIS_PORT not set in .env',
+                is_error=True,
+            )
+        )
+    else:
+        report.add(ValidationResult(name='REDIS_PORT', passed=True, message=f'REDIS_PORT set: {redis_port}'))
+
     # Check 4: Port conflicts (if ports are set)
     if web_port and db_port:
         try:
             web_port_int = int(web_port)
             db_port_int = int(db_port)
+            redis_port_int = int(redis_port) if redis_port else None
 
             # Check for active port conflicts
-            conflicts = check_port_conflicts(web_port_int, db_port_int)
+            conflicts = check_port_conflicts(web_port_int, db_port_int, redis_port_int)
             for conflict in conflicts:
                 proc_info = ''
                 if conflict.process_name:
@@ -162,7 +177,9 @@ def validate_worktree(worktree_path: str, strict_ports: bool = True) -> Validati
                 )
 
             # Check for registry conflicts
-            reg_conflicts = check_registry_conflicts(web_port_int, db_port_int, exclude_path=worktree_path)
+            reg_conflicts = check_registry_conflicts(
+                web_port_int, db_port_int, redis_port_int, exclude_path=worktree_path
+            )
             for conflict in reg_conflicts:
                 report.add(
                     ValidationResult(
@@ -183,7 +200,7 @@ def validate_worktree(worktree_path: str, strict_ports: bool = True) -> Validati
                 ValidationResult(
                     name='Port format',
                     passed=False,
-                    message='WEB_PORT or DB_PORT is not a valid integer',
+                    message='WEB_PORT, DB_PORT, or REDIS_PORT is not a valid integer',
                     is_error=True,
                 )
             )

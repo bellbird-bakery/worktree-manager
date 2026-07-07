@@ -11,6 +11,7 @@ with automatic port allocation and database cloning capabilities.
 # Base ports for worktrees (can be overridden in project config)
 BASE_WEB_PORT = 58000
 BASE_DB_PORT = 5432
+BASE_REDIS_PORT = 6379
 
 # Default project name - None means auto-detect from git/directory
 DEFAULT_PROJECT_NAME = None

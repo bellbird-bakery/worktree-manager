@@ -43,6 +43,10 @@ DEFAULT_CONFIG: dict[str, Any] = {
             'enabled': True,
             'auto_launch': False,
         },
+        'uv_sync': {
+            'enabled': True,
+            'extra_args': [],
+        },
     },
 }
 

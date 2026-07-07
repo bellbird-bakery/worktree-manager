@@ -174,6 +174,15 @@ def build_parser() -> argparse.ArgumentParser:
         help='Everything after the feature name is passed through to claude',
     )
 
+    backfill_parser = subparsers.add_parser(
+        'backfill-ports', help='Assign a unique REDIS_PORT to existing worktrees that lack one'
+    )
+    backfill_parser.add_argument(
+        '--dry-run',
+        action='store_true',
+        help='Show what would change without writing registry or .env files',
+    )
+
     return parser
 
 
@@ -215,6 +224,8 @@ def main() -> int:
             return commands.cleanup_orphans(dry_run=args.dry_run)
         elif args.command == 'prune':
             return commands.prune_missing_worktrees()
+        elif args.command == 'backfill-ports':
+            return commands.backfill_redis_ports_cmd(dry_run=args.dry_run)
         elif args.command == 'load-db':
             return commands.load_db_cmd(
                 feature_name=args.feature_name,

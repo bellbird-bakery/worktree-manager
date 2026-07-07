@@ -41,13 +41,15 @@ class WorktreePorts:
 
     web: int
     db: int
+    redis: int = 0
 
     def to_dict(self) -> dict:
-        return {'web': self.web, 'db': self.db}
+        return {'web': self.web, 'db': self.db, 'redis': self.redis}
 
     @classmethod
     def from_dict(cls, data: dict) -> WorktreePorts:
-        return cls(web=data['web'], db=data['db'])
+        # redis defaults to 0 for legacy registry entries created before REDIS_PORT allocation.
+        return cls(web=data['web'], db=data['db'], redis=data.get('redis', 0))
 
 
 @dataclass

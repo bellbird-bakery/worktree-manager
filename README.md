@@ -166,15 +166,18 @@ worktree-manager web --port 8000
 
 Worktrees are assigned ports based on their index to prevent conflicts:
 
-| Index | Web Port | DB Port |
-|-------|----------|---------|
-| 0 (main) | 8000 | 5432 |
-| 1 | 8010 | 5442 |
-| 2 | 8020 | 5452 |
-| 3 | 8030 | 5462 |
-| N | 8000 + N×10 | 5432 + N×10 |
+| Index | Web Port | DB Port | Redis Port |
+|-------|----------|---------|------------|
+| 0 (main) | 8000 | 5432 | 6379 |
+| 1 | 8010 | 5442 | 6380 |
+| 2 | 8020 | 5452 | 6381 |
+| 3 | 8030 | 5462 | 6382 |
+| N | 8000 + N×10 | 5432 + N×10 | 6379 + N |
 
-Ports are stored in the `.env` file as `WEB_PORT` and `DB_PORT`.
+Ports are stored in the `.env` file as `WEB_PORT`, `DB_PORT`, and `REDIS_PORT`.
+
+Worktrees created before Redis port allocation can be backfilled with a unique
+`REDIS_PORT` via `worktree-manager backfill-ports` (add `--dry-run` to preview).
 
 ## Task Storage
 

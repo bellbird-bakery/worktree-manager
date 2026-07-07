@@ -286,7 +286,10 @@ def get_lifecycle_hook_manager() -> LifecycleHookManager:
 def _register_default_lifecycle_hooks(manager: LifecycleHookManager) -> None:
     """Register all default lifecycle hooks."""
     from worktree_manager.hooks.claude import ClaudeLaunchHook
+    from worktree_manager.hooks.uv import UvSyncHook
 
+    # uv sync runs first so dependencies are ready before a Claude session launches.
+    manager.register(UvSyncHook())
     manager.register(ClaudeLaunchHook())
 
 
