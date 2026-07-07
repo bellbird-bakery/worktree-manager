@@ -4,8 +4,8 @@ build-backend = "hatchling.build"
 
 [project]
 name = "worktree-manager"
-version = "1.5.1"
-description = "Git worktree manager with Docker Compose isolation and Kanban task tracking"
+version = "1.6.0"
+description = "Git worktree manager with Docker Compose isolation"
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.11"
@@ -17,8 +17,6 @@ keywords = [
     "worktree",
     "docker",
     "docker-compose",
-    "task-management",
-    "kanban",
 ]
 classifiers = [
     "Development Status :: 4 - Beta",
@@ -37,17 +35,12 @@ classifiers = [
 
 dependencies = [
     "rich>=13.0.0",
-    "starlette>=0.40.0",
-    "uvicorn>=0.30.0",
-    "jinja2>=3.1.0",
     "filelock>=3.0.0",
-    "python-multipart>=0.0.9",
 ]
 
 [project.optional-dependencies]
 dev = [
     "pytest>=8.0.0",
-    "pytest-asyncio>=0.24.0",
     "ruff>=0.8.0",
     "mypy>=1.13.0",
 ]
@@ -68,8 +61,6 @@ packages = ["worktree_manager"]
 [tool.hatch.build.targets.sdist]
 include = [
     "worktree_manager/**/*.py",
-    "worktree_manager/templates/**/*.html",
-    "worktree_manager/static/**/*",
     "scripts/*.sh",
     "README.md",
     "LICENSE",

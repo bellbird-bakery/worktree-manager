@@ -130,14 +130,6 @@ def build_parser() -> argparse.ArgumentParser:
     # update-last-accessed command
     subparsers.add_parser('update-last-accessed', help='Update last accessed timestamp')
 
-    # web command
-    web_parser = subparsers.add_parser('web', help='Start Kanban web interface')
-    web_parser.add_argument('--port', type=int, default=8000, help='Port to run on (default: 8000)')
-    web_parser.add_argument('--host', default='127.0.0.1', help='Host to bind to (default: 127.0.0.1)')
-
-    # sync-tasks command (syncs tasks with worktree registry)
-    subparsers.add_parser('sync-tasks', help='Sync tasks with worktree registry')
-
     # setup command
     subparsers.add_parser('setup', help='Run interactive setup wizard')
 
@@ -172,6 +164,16 @@ def build_parser() -> argparse.ArgumentParser:
         'claude_args',
         nargs=argparse.REMAINDER,
         help='Everything after the feature name is passed through to claude',
+    )
+
+    shell_init_parser = subparsers.add_parser(
+        'shell-init', help='Print shell integration so `wt create`/`wt close` change your shell directory'
+    )
+    shell_init_parser.add_argument(
+        '--shell',
+        choices=['bash', 'zsh', 'fish'],
+        default=None,
+        help='Target shell (default: auto-detect from $SHELL)',
     )
 
     backfill_parser = subparsers.add_parser(
@@ -234,10 +236,6 @@ def main() -> int:
             )
         elif args.command == 'update-last-accessed':
             return commands.update_last_accessed()
-        elif args.command == 'web':
-            return commands.start_web(host=args.host, port=args.port)
-        elif args.command == 'sync-tasks':
-            return commands.sync_tasks_cmd()
         elif args.command == 'setup':
             return commands.setup_cmd()
         elif args.command == 'config':
@@ -256,6 +254,8 @@ def main() -> int:
                 continue_session=args.continue_session,
                 extra_args=extra_args,
             )
+        elif args.command == 'shell-init':
+            return commands.shell_init_cmd(shell=args.shell)
         else:
             parser.print_help()
             return 1

@@ -50,7 +50,3 @@ check: lint test
 # Sync dependencies
 sync:
     uv sync
-
-# Start web UI
-web:
-    wt web

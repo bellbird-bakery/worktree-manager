@@ -1,6 +1,6 @@
 # Worktree Manager
 
-A Git worktree manager with Docker Compose isolation and Kanban task tracking.
+A Git worktree manager with Docker Compose isolation.
 
 ## Overview
 
@@ -8,7 +8,6 @@ Worktree Manager helps you work on multiple features simultaneously by:
 
 - **Git Worktrees**: Create isolated working directories for each feature branch
 - **Docker Isolation**: Automatic port allocation prevents conflicts between worktrees
-- **Task Tracking**: Built-in Kanban board to track feature progress
 - **Database Cloning**: Clone databases between worktrees for testing
 - **Safety Checks**: Prevents closing worktrees with uncommitted/unpushed changes
 
@@ -65,7 +64,6 @@ This will:
 2. Create the feature branch `feature/my-feature`
 3. Allocate unique ports (web, database)
 4. Create a `.env` file with the allocated ports
-5. Add a task to the Kanban board
 
 #### Branch type options
 
@@ -88,14 +86,7 @@ docker compose up -d
 # ... make changes ...
 ```
 
-### 4. Track progress with the Kanban board
-
-```bash
-worktree-manager web
-# Open http://localhost:8000
-```
-
-### 5. Close the worktree when done
+### 4. Close the worktree when done
 
 ```bash
 worktree-manager close
@@ -106,7 +97,6 @@ This will:
 2. Verify the branch is merged to develop
 3. Stop Docker containers
 4. Remove the worktree directory
-5. Mark the task as done
 
 ## Commands
 
@@ -119,11 +109,33 @@ This will:
 | `worktree-manager claude [name] [-c]` | `wt claude` | Launch a Claude Code session in a worktree |
 | `worktree-manager clone-db <index>` | | Clone database from another worktree |
 | `worktree-manager cleanup-orphans` | | Clean up orphaned Docker resources |
-| `worktree-manager web [--port PORT]` | | Start the Kanban web interface |
-| `worktree-manager sync-tasks` | | Sync tasks with worktree registry |
 | `worktree-manager setup` | | Run interactive setup wizard |
 | `worktree-manager config` | | Show or modify configuration |
 | `worktree-manager init` | | Initialize project configuration |
+| `worktree-manager shell-init [--shell SHELL]` | `wt shell-init` | Print shell integration for auto-`cd` on create/close |
+
+### Shell Integration (auto-`cd`)
+
+By default `wt create` and `wt close` can't change your shell's working directory
+(a subprocess can't `cd` its parent shell). Enable the shell wrapper so that:
+
+- `wt create foo` drops you into the new worktree directory, and
+- `wt close` returns you to the main repository directory.
+
+Add one line to your shell's rc file:
+
+```bash
+# bash (~/.bashrc) or zsh (~/.zshrc)
+eval "$(wt shell-init)"
+```
+
+```fish
+# fish (~/.config/fish/config.fish)
+wt shell-init --shell fish | source
+```
+
+Reload your shell (or `source` the rc file) and the `cd` happens automatically.
+Without the wrapper, `wt` still works and just prints the directory to `cd` into.
 
 ### Claude Code Sessions
 
@@ -147,21 +159,6 @@ After `wt create`, the `claude_launch` hook prints the matching `wt claude` comm
 | `-V, --version` | Show version and exit |
 | `--non-interactive` | Fail instead of prompting (for CI/CD) |
 
-## Web Interface
-
-The Kanban web interface provides:
-
-- **Board View**: Drag-and-drop tasks between Todo, In Progress, and Done columns
-- **Worktrees View**: See all worktrees with their status, ports, and actions
-- **Close Worktree**: Close worktrees with safety checks (uncommitted changes, unpushed commits, unmerged branches)
-- **Load Database**: Load production database dumps into worktrees
-
-Start the web interface:
-
-```bash
-worktree-manager web --port 8000
-```
-
 ## Port Allocation
 
 Worktrees are assigned ports based on their index to prevent conflicts:
@@ -178,10 +175,6 @@ Ports are stored in the `.env` file as `WEB_PORT`, `DB_PORT`, and `REDIS_PORT`.
 
 Worktrees created before Redis port allocation can be backfilled with a unique
 `REDIS_PORT` via `worktree-manager backfill-ports` (add `--dry-run` to preview).
-
-## Task Storage
-
-Tasks are stored in a local SQLite database (`~/.config/dispatch-guru/tasks.db`). When you create a worktree, a corresponding task is automatically created on the Kanban board. Use `worktree-manager sync-tasks` to ensure tasks are in sync with the worktree registry.
 
 ## Configuration
 
@@ -253,9 +246,7 @@ Before closing a worktree, the tool checks:
 2. **Unpushed commits**: Commits not pushed to remote
 3. **Unmerged branch**: Branch not merged to the base branch (usually `develop`)
 
-If any check fails:
-- **CLI**: Prompts for confirmation or use `--force`
-- **Web UI**: Shows warning and requires "Force Close" button
+If any check fails, the CLI prompts for confirmation or you can use `--force`.
 
 ### Database Cloning
 
@@ -265,9 +256,6 @@ Clone databases safely between worktrees:
 # From CLI (in target worktree)
 worktree-manager clone-db 0  # Clone from main repo (index 0)
 worktree-manager clone-db 1  # Clone from worktree index 1
-
-# From Web UI
-# Go to Worktrees > Clone DB button
 ```
 
 ## CI/CD Integration
@@ -290,11 +278,10 @@ worktree-manager -yq create ci-test
 
 ## Hooks
 
-Worktree Manager supports lifecycle hooks for custom automation:
+Worktree Manager supports lifecycle hooks that run when a worktree is created or closed:
 
-- **Git hooks**: Auto-commit on status change
-- **Docker hooks**: Auto-start/stop containers
-- **Notification hooks**: Desktop notifications
+- **uv sync hook**: Install dependencies in the new worktree
+- **Claude launch hook**: Launch Claude Code in the new worktree
 
 Configure hooks in `~/.config/dispatch-guru/hooks.json`.
 
@@ -308,13 +295,6 @@ worktree-manager list
 
 # Clean up orphaned resources
 worktree-manager cleanup-orphans
-```
-
-### Worktree not in registry
-
-```bash
-# Re-sync the registry
-worktree-manager sync-tasks
 ```
 
 ### Permission issues (Docker)
@@ -371,7 +351,6 @@ just fmt          # Format code
 just test         # Run tests
 just check        # Run all checks (lint + test)
 just sync         # Sync dependencies
-just web          # Start web UI
 ```
 
 ## License

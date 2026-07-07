@@ -53,6 +53,26 @@ from .validator import validate_worktree
 logger = logging.getLogger('worktree_manager')
 console = Console()
 
+# Environment variable set by the `wt` shell function (see `wt shell-init`).
+# When present, it names a file the CLI writes a target directory to so the
+# wrapping shell function can `cd` the parent shell after create/close.
+CD_TARGET_ENV = 'WT_CD_FILE'
+
+
+def _emit_cd_target(path: Path | str) -> None:
+    """Write a directory for the shell wrapper to cd into, if integration is active.
+
+    Does nothing when the ``WT_CD_FILE`` env var is unset (i.e. `wt` is being run
+    directly rather than through the `wt shell-init` shell function).
+    """
+    cd_file = os.environ.get(CD_TARGET_ENV)
+    if not cd_file:
+        return
+    try:
+        Path(cd_file).write_text(f'{path}\n')
+    except OSError as e:
+        logger.warning(f'Failed to write cd target to {cd_file}: {e}')
+
 
 def create_worktree_cmd(feature_name: str, branch_type: str | None = 'feature') -> int:
     """
@@ -187,11 +207,6 @@ def create_worktree_cmd(feature_name: str, branch_type: str | None = 'feature') 
         )
         registry.add_worktree(entry)
 
-    # Create task for the worktree
-    console.print('Creating task...')
-    create_task_for_worktree(feature_name, str(worktree_path))
-    console.print('[green]Task created in Kanban board[/green]')
-
     # Run lifecycle hooks for worktree creation
     from worktree_manager.hooks import WorktreeLifecycleContext, get_lifecycle_hook_manager
 
@@ -214,11 +229,15 @@ def create_worktree_cmd(feature_name: str, branch_type: str | None = 'feature') 
     console.print(Panel.fit('[bold green]Worktree Created Successfully![/bold green]', border_style='green'))
     console.print()
     console.print('Next steps:')
-    console.print(f'  1. cd [cyan]{worktree_path}[/cyan]')
-    console.print('  2. [cyan]just build && just up[/cyan]')
+    if os.environ.get(CD_TARGET_ENV):
+        console.print('  1. [cyan]just build && just up[/cyan]')
+    else:
+        console.print(f'  1. cd [cyan]{worktree_path}[/cyan]')
+        console.print('  2. [cyan]just build && just up[/cyan]')
     console.print()
-    console.print('View tasks: [cyan]worktree-manager web[/cyan]')
-    console.print()
+
+    # Ask the shell wrapper (if any) to cd into the new worktree.
+    _emit_cd_target(worktree_path)
 
     return 0
 
@@ -626,18 +645,82 @@ def close_worktree(message: str, keep_volumes: bool = False) -> int:
             reg.remove_worktree(current_path)
         console.print('[green]Removed from registry[/green]')
 
-    # Step 6: Mark task as done
-    if entry:
-        console.print('Marking task as done...')
-        complete_task_for_worktree(entry.feature_name)
-        console.print('[green]Task marked as done[/green]')
-
     console.print()
     console.print(Panel.fit('[bold green]Worktree Closed Successfully![/bold green]', border_style='green'))
     console.print()
     console.print(f'You are now in: [cyan]{main_repo}[/cyan]')
     console.print()
 
+    # Ask the shell wrapper (if any) to cd back to the main repo.
+    _emit_cd_target(main_repo)
+
+    return 0
+
+
+_POSIX_SHELL_INIT = """\
+# worktree-manager shell integration.
+# Wraps `wt` so `wt create` / `wt close` change the current shell's directory.
+# Add to your shell rc file:  eval "$(wt shell-init)"
+wt() {
+    if [ "$1" = "shell-init" ]; then
+        command wt "$@"
+        return $?
+    fi
+    local _wt_cd_file
+    _wt_cd_file="$(mktemp "${TMPDIR:-/tmp}/wt-cd.XXXXXX")" || { command wt "$@"; return $?; }
+    WT_CD_FILE="$_wt_cd_file" command wt "$@"
+    local _wt_ret=$?
+    if [ -s "$_wt_cd_file" ]; then
+        cd "$(cat "$_wt_cd_file")" || true
+    fi
+    rm -f "$_wt_cd_file"
+    return $_wt_ret
+}
+"""
+
+_FISH_SHELL_INIT = """\
+# worktree-manager shell integration.
+# Wraps `wt` so `wt create` / `wt close` change the current shell's directory.
+# Add to your config.fish:  wt shell-init --shell fish | source
+function wt
+    if test "$argv[1]" = shell-init
+        command wt $argv
+        return $status
+    end
+    set -l _wt_cd_file (mktemp)
+    env WT_CD_FILE=$_wt_cd_file command wt $argv
+    set -l _wt_ret $status
+    if test -s "$_wt_cd_file"
+        cd (cat "$_wt_cd_file")
+    end
+    rm -f "$_wt_cd_file"
+    return $_wt_ret
+end
+"""
+
+
+def shell_init_cmd(shell: str | None = None) -> int:
+    """Print shell integration code for `eval`/`source` in a shell rc file.
+
+    Args:
+        shell: 'bash', 'zsh', 'fish', or None to auto-detect from $SHELL.
+
+    Returns:
+        Exit code (0 for success).
+    """
+    if not shell:
+        shell = os.path.basename(os.environ.get('SHELL', '')).lower()
+
+    if shell == 'fish':
+        script = _FISH_SHELL_INIT
+    elif shell in ('bash', 'zsh', 'sh', 'ksh', ''):
+        script = _POSIX_SHELL_INIT
+    else:
+        console.print(f'[red]Error: unsupported shell {shell!r} (use bash, zsh, or fish)[/red]')
+        return 1
+
+    # Print raw (no Rich markup) so the output is safe to eval/source.
+    print(script, end='')
     return 0
 
 
@@ -809,170 +892,6 @@ def update_last_accessed() -> int:
                 break
 
     return 0
-
-
-def start_web(host: str = '127.0.0.1', port: int = 8000) -> int:
-    """
-    Start the Kanban web interface.
-
-    Args:
-        host: Host to bind to.
-        port: Port to run on.
-
-    Returns:
-        Exit code (0 for success).
-    """
-    console.print()
-    console.print(Panel.fit('[bold]Worktree Task Tracker[/bold]', border_style='blue'))
-    console.print()
-
-    # Initialize database
-    console.print('Initializing database...')
-    try:
-        from .task_store import ensure_db
-
-        ensure_db()
-        console.print('[green]Database ready[/green]')
-    except Exception as e:
-        console.print(f'[red]Error initializing database: {e}[/red]')
-        return 1
-
-    # Start uvicorn with Starlette app
-    console.print()
-    console.print(f'Starting server at [cyan]http://{host}:{port}[/cyan]')
-    console.print('Press [cyan]Ctrl+C[/cyan] to stop')
-    console.print()
-
-    try:
-        import uvicorn
-
-        uvicorn.run(
-            'worktree_manager.web:create_app',
-            host=host,
-            port=port,
-            reload=False,
-            factory=True,
-            log_level='info',
-        )
-        return 0
-    except ImportError:
-        console.print('[red]Error: uvicorn not installed[/red]')
-        console.print()
-        console.print('Install with:')
-        console.print('  [cyan]uv add uvicorn[/cyan]')
-        return 1
-    except KeyboardInterrupt:
-        console.print()
-        console.print('[yellow]Server stopped[/yellow]')
-        return 0
-
-
-def sync_tasks_cmd() -> int:
-    """
-    Synchronize tasks with the worktree registry.
-
-    Returns:
-        Exit code (0 for success).
-    """
-    console.print()
-    console.print(Panel.fit('[bold]Syncing Tasks[/bold]', border_style='blue'))
-    console.print()
-
-    # Ensure database exists
-    from .task_store import TaskStatus, ensure_db, save_task, tasks
-
-    ensure_db()
-
-    # Get registry
-    registry = read_registry()
-    if not registry:
-        console.print('[yellow]No worktree registry found.[/yellow]')
-        return 0
-
-    console.print(f'Found [cyan]{len(registry.worktrees)}[/cyan] registered worktrees')
-    console.print()
-
-    created_count = 0
-    updated_count = 0
-
-    for worktree in registry.worktrees:
-        task, created = tasks.get_or_create(
-            feature_name=worktree.feature_name,
-            defaults={
-                'title': worktree.feature_name.replace('-', ' ').replace('_', ' ').title(),
-                'worktree_path': worktree.path,
-                'status': TaskStatus.TODO.value,
-            },
-        )
-
-        if created:
-            console.print(f'  [green]Created:[/green] {task.title}')
-            created_count += 1
-        elif task.worktree_path != worktree.path:
-            task.worktree_path = worktree.path
-            save_task(task)
-            console.print(f'  [yellow]Updated:[/yellow] {task.title}')
-            updated_count += 1
-        else:
-            console.print(f'  [dim]Exists:[/dim] {task.title}')
-
-    console.print()
-    console.print(
-        Panel.fit(
-            f'[bold green]Sync Complete![/bold green]\n\nCreated: {created_count}\nUpdated: {updated_count}',
-            border_style='green',
-        )
-    )
-    console.print()
-
-    return 0
-
-
-def create_task_for_worktree(feature_name: str, worktree_path: str) -> None:
-    """
-    Create a task for a new worktree.
-
-    Args:
-        feature_name: Name of the feature branch.
-        worktree_path: Path to the worktree directory.
-    """
-    try:
-        from .task_store import TaskStatus, ensure_db, tasks
-
-        ensure_db()
-
-        tasks.get_or_create(
-            feature_name=feature_name,
-            defaults={
-                'title': feature_name.replace('-', ' ').replace('_', ' ').title(),
-                'worktree_path': worktree_path,
-                'status': TaskStatus.TODO.value,
-            },
-        )
-    except Exception as e:
-        logger.warning(f'Task creation failed for {feature_name}: {e}')
-        console.print(f'[yellow]Warning: Task creation failed: {e}[/yellow]')
-
-
-def complete_task_for_worktree(feature_name: str) -> None:
-    """
-    Mark a task as done when closing a worktree.
-
-    Args:
-        feature_name: Name of the feature branch.
-    """
-    try:
-        from .task_store import TaskStatus, ensure_db, save_task, tasks
-
-        ensure_db()
-
-        task = tasks.get_by_feature(feature_name)
-        if task:
-            task.status = TaskStatus.DONE.value
-            save_task(task)
-    except Exception as e:
-        logger.warning(f'Task completion failed for {feature_name}: {e}')
-        console.print(f'[yellow]Warning: Task completion failed: {e}[/yellow]')
 
 
 def setup_cmd() -> int:

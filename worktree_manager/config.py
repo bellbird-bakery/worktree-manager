@@ -555,7 +555,6 @@ def migrate_legacy_config() -> bool:
     files_to_migrate = [
         ('worktrees.json', 'registry.json'),  # Renamed
         ('config.json', 'config.json'),
-        ('tasks.db', 'tasks.db'),
     ]
 
     for old_name, new_name in files_to_migrate:

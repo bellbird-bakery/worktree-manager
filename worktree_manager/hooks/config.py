@@ -21,24 +21,6 @@ CONFIG_FILE = CONFIG_DIR / 'hooks.json'
 DEFAULT_CONFIG: dict[str, Any] = {
     'version': 1,
     'hooks': {
-        'docker_start': {
-            'enabled': True,
-            'auto_build': True,
-        },
-        'docker_stop': {
-            'enabled': True,
-            'remove_volumes': False,
-        },
-        'git_commit': {
-            'enabled': True,
-            'default_message': 'Complete {feature_name}',
-        },
-        'console_notify': {
-            'enabled': True,
-        },
-        'system_notify': {
-            'enabled': True,
-        },
         'claude_launch': {
             'enabled': True,
             'auto_launch': False,
