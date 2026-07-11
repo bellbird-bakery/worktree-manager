@@ -148,7 +148,7 @@ wt claude -c my-feature       # Resume the worktree's most recent session
 wt claude my-feature -p "run the tests"   # Args after the name are passed through to claude
 ```
 
-After `wt create`, the `claude_launch` hook prints the matching `wt claude` command. Set `auto_launch: true` for `claude_launch` in `~/.config/dispatch-guru/hooks.json` to instead open the session automatically in a new tmux window (requires an active tmux session).
+After `wt create`, the `claude_launch` hook prints the matching `wt claude` command. Set `auto_launch: true` for `claude_launch` in `~/.config/worktree-manager/hooks.json` to instead open the session automatically in a new tmux window (requires an active tmux session).
 
 ### Global Options
 
@@ -165,11 +165,11 @@ Worktrees are assigned ports based on their index to prevent conflicts:
 
 | Index | Web Port | DB Port | Redis Port |
 |-------|----------|---------|------------|
-| 0 (main) | 8000 | 5432 | 6379 |
-| 1 | 8010 | 5442 | 6380 |
-| 2 | 8020 | 5452 | 6381 |
-| 3 | 8030 | 5462 | 6382 |
-| N | 8000 + N×10 | 5432 + N×10 | 6379 + N |
+| 0 (main) | 58000 | 5432 | 6379 |
+| 1 | 58001 | 5433 | 6380 |
+| 2 | 58002 | 5434 | 6381 |
+| 3 | 58003 | 5435 | 6382 |
+| N | 58000 + N | 5432 + N | 6379 + N |
 
 Ports are stored in the `.env` file as `WEB_PORT`, `DB_PORT`, and `REDIS_PORT`.
 
@@ -201,7 +201,7 @@ Created per-project with `worktree-manager init`:
 }
 ```
 
-### Global Configuration (`~/.config/dispatch-guru/config.json`)
+### Global Configuration (`~/.config/worktree-manager/config.json`)
 
 User-specific settings:
 
@@ -217,7 +217,7 @@ User-specific settings:
 }
 ```
 
-### Registry (`~/.config/dispatch-guru/registry.json`)
+### Registry (`~/.config/worktree-manager/registry.json`)
 
 Tracks all worktrees across projects:
 
@@ -283,7 +283,7 @@ Worktree Manager supports lifecycle hooks that run when a worktree is created or
 - **uv sync hook**: Install dependencies in the new worktree
 - **Claude launch hook**: Launch Claude Code in the new worktree
 
-Configure hooks in `~/.config/dispatch-guru/hooks.json`.
+Configure hooks in `~/.config/worktree-manager/hooks.json`.
 
 ## Troubleshooting
 
