@@ -17,9 +17,10 @@ All notable changes to this project will be documented in this file.
   - Safe by default: only closes worktrees whose branch is merged to the base branch
     with no uncommitted changes and no unpushed commits; the rest are skipped and
     reported in a plan table with their reason (`unmerged`/`dirty`/`unpushed`)
-  - `--force` closes them all (auto-committing dirty ones); `--prune` additionally
-    removes Docker volumes, drops each worktree's shared database, and flushes its
-    shared-Redis DBs (a no-op unless those blocks are configured)
+  - `--force` closes them all, warning about and **discarding** any uncommitted
+    changes (it does not auto-commit); `--prune` additionally removes Docker volumes,
+    drops each worktree's shared database, and flushes its shared-Redis DBs (a no-op
+    unless those blocks are configured)
   - Shared teardown helper `_teardown_worktree`; single `close` now also flushes the
     shared-Redis DBs (when configured) for parity with `close-all --prune`
 - **`--raw` flag for `create` command** - Use branch names as-is without `feature/` or `fix/` prefix
@@ -38,6 +39,12 @@ All notable changes to this project will be documented in this file.
   index, removes the retired `REDIS_PORT`, and comments out any active
   `redis://redis:...` full-URL override (which would otherwise win over the composed
   parts and point celery at the now-CI-only `redis` host)
+
+### Fixed
+- **`is_worktree()` misdetection** - It now compares the resolved git-dir and
+  git-common-dir instead of testing `is_relative_to(toplevel)`, which returned a
+  relative `.git` on current git and made the main checkout (and its subdirectories)
+  wrongly report as a worktree
 
 ### Removed
 - **JSON task storage** - Removed `.worktree-tasks.json` file and all JSON synchronization features

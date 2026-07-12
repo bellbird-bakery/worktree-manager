@@ -100,7 +100,7 @@ def test_classify_partitions_mixed_set(clean_merged_pushed, monkeypatch):
 @pytest.fixture
 def teardown_spies(monkeypatch):
     """Stub every side-effecting action _teardown_worktree performs; record the calls."""
-    calls = {'compose_down': [], 'drop_db': [], 'flush': [], 'removed': [], 'committed': []}
+    calls = {'compose_down': [], 'drop_db': [], 'flush': [], 'removed': []}
     monkeypatch.setattr(commands, 'is_docker_running', lambda: True)
     monkeypatch.setattr(commands, 'fix_permissions', lambda path, proj: True)
     monkeypatch.setattr(
@@ -108,9 +108,6 @@ def teardown_spies(monkeypatch):
     )
     monkeypatch.setattr(commands, 'remove_worktree', lambda path, force=False: calls['removed'].append(path))
     monkeypatch.setattr(commands, 'has_uncommitted_changes_in_path', lambda path: False)
-    monkeypatch.setattr(
-        commands, 'commit_all_in_path', lambda path, msg: calls['committed'].append((path, msg)) or True
-    )
     monkeypatch.setattr(
         commands,
         '_maybe_drop_shared_db',
@@ -133,7 +130,7 @@ def _cfg(shared_redis=None):
 
 def test_teardown_no_prune_keeps_volumes_and_data(teardown_spies):
     cfg = _cfg(shared_redis={'flush_command': 'just redis-flush-self'})
-    result = commands._teardown_worktree(_entry('a', 1), cfg, prune=False, message='m')
+    result = commands._teardown_worktree(_entry('a', 1), cfg, prune=False)
     assert result.ok
     assert teardown_spies['compose_down'] == [('proj-a', False)]
     assert teardown_spies['drop_db'] == []  # DB not dropped without --prune
@@ -143,7 +140,7 @@ def test_teardown_no_prune_keeps_volumes_and_data(teardown_spies):
 
 def test_teardown_prune_removes_volumes_drops_db_and_flushes_redis(teardown_spies):
     cfg = _cfg(shared_redis={'flush_command': 'just redis-flush-self'})
-    result = commands._teardown_worktree(_entry('a', 1), cfg, prune=True, message='m')
+    result = commands._teardown_worktree(_entry('a', 1), cfg, prune=True)
     assert result.ok
     assert teardown_spies['compose_down'] == [('proj-a', True)]
     assert teardown_spies['drop_db'] == ['proj-a']
@@ -153,15 +150,21 @@ def test_teardown_prune_removes_volumes_drops_db_and_flushes_redis(teardown_spie
 
 def test_teardown_prune_without_flush_command_skips_flush(teardown_spies):
     cfg = _cfg(shared_redis={})  # no flush_command configured
-    commands._teardown_worktree(_entry('a', 1), cfg, prune=True, message='m')
+    commands._teardown_worktree(_entry('a', 1), cfg, prune=True)
     assert teardown_spies['flush'] == []
     assert teardown_spies['drop_db'] == ['proj-a']  # DB drop still happens
 
 
-def test_teardown_commits_dirty_worktree(teardown_spies, monkeypatch):
+def test_teardown_discards_dirty_worktree_without_committing(teardown_spies, monkeypatch):
+    # A dirty worktree (reachable only under --force) is deleted, discarding its
+    # uncommitted changes — it is NOT auto-committed.
+    committed = []
+    monkeypatch.setattr(commands, 'commit_all', lambda msg: committed.append(msg) or True)
     monkeypatch.setattr(commands, 'has_uncommitted_changes_in_path', lambda path: True)
-    commands._teardown_worktree(_entry('a', 1), _cfg(), prune=False, message='wip: close-all')
-    assert teardown_spies['committed'] == [('/wt/a', 'wip: close-all')]
+    result = commands._teardown_worktree(_entry('a', 1), _cfg(), prune=False)
+    assert result.ok
+    assert committed == []  # no commit made
+    assert teardown_spies['removed'] == ['/wt/a']  # removed anyway
 
 
 def test_teardown_reports_error_and_does_not_raise(teardown_spies, monkeypatch):
@@ -169,7 +172,7 @@ def test_teardown_reports_error_and_does_not_raise(teardown_spies, monkeypatch):
         raise commands.GitError('worktree busy')
 
     monkeypatch.setattr(commands, 'remove_worktree', boom)
-    result = commands._teardown_worktree(_entry('a', 1), _cfg(), prune=False, message='m')
+    result = commands._teardown_worktree(_entry('a', 1), _cfg(), prune=False)
     assert not result.ok
     assert 'worktree busy' in result.error
 
@@ -191,8 +194,8 @@ def orchestrator_env(monkeypatch, clean_merged_pushed):
     """Wire close_all_cmd to run in 'main repo', with a spied-on teardown."""
     torn_down = []
 
-    def fake_teardown(entry, project_config, *, prune, message):
-        torn_down.append((entry.feature_name, prune, message))
+    def fake_teardown(entry, project_config, *, prune):
+        torn_down.append((entry.feature_name, prune))
         return commands.TeardownResult(feature_name=entry.feature_name, ok=True)
 
     from pathlib import Path
@@ -243,7 +246,7 @@ def test_close_all_tears_down_and_removes_from_registry(monkeypatch, orchestrato
     _install_registry(monkeypatch, reg)
     rc = commands.close_all_cmd(assume_yes=True)
     assert rc == 0
-    assert [name for name, _, _ in orchestrator_env] == ['a', 'b']
+    assert [name for name, _ in orchestrator_env] == ['a', 'b']
     assert reg.removed == ['/wt/a', '/wt/b']
 
 
@@ -260,12 +263,12 @@ def test_close_all_skips_unsafe_worktrees(monkeypatch, orchestrator_env):
     _install_registry(monkeypatch, reg)
     rc = commands.close_all_cmd(assume_yes=True)
     assert rc == 0
-    assert [name for name, _, _ in orchestrator_env] == ['a']
+    assert [name for name, _ in orchestrator_env] == ['a']
     assert reg.removed == ['/wt/a']
 
 
 def test_close_all_failed_teardown_stays_in_registry(monkeypatch, orchestrator_env):
-    def failing_teardown(entry, project_config, *, prune, message):
+    def failing_teardown(entry, project_config, *, prune):
         return commands.TeardownResult(feature_name=entry.feature_name, ok=False, error='boom')
 
     monkeypatch.setattr(commands, '_teardown_worktree', failing_teardown)

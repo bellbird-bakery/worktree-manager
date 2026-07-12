@@ -72,10 +72,17 @@ def get_main_repo_root() -> Path:
 
 
 def is_worktree() -> bool:
-    """Check if the current directory is a worktree (not the main repo)."""
+    """Check if the current directory is a linked worktree (not the main repo).
+
+    In the main checkout ``--git-dir`` and ``--git-common-dir`` resolve to the same
+    ``.git`` directory; in a linked worktree the git-dir is ``.git/worktrees/<name>``
+    while the common-dir is the shared ``.git``. Comparing the two resolved paths is
+    robust even when git reports a relative common-dir (e.g. a bare ``.git``), which
+    an ``is_relative_to(toplevel)`` check misread as a worktree.
+    """
     try:
-        toplevel = subprocess.run(
-            ['git', 'rev-parse', '--show-toplevel'],
+        git_dir = subprocess.run(
+            ['git', 'rev-parse', '--git-dir'],
             capture_output=True,
             text=True,
             check=True,
@@ -86,11 +93,7 @@ def is_worktree() -> bool:
             text=True,
             check=True,
         )
-        toplevel_path = Path(toplevel.stdout.strip())
-        common_path = Path(common_dir.stdout.strip())
-
-        # If common dir is not in toplevel, this is a worktree
-        return not common_path.is_relative_to(toplevel_path)
+        return Path(git_dir.stdout.strip()).resolve() != Path(common_dir.stdout.strip()).resolve()
     except subprocess.CalledProcessError:
         return False
 
@@ -311,20 +314,6 @@ def commit_all(message: str) -> bool:
 
     # Commit
     subprocess.run(['git', 'commit', '-m', message], check=True)
-    return True
-
-
-def commit_all_in_path(path: str, message: str) -> bool:
-    """Stage all changes and commit in the worktree at *path*.
-
-    Path-scoped counterpart to :func:`commit_all` for operating on a worktree other
-    than the current directory. Returns True if a commit was made, False if there
-    was nothing to commit.
-    """
-    if not has_uncommitted_changes_in_path(path):
-        return False
-    subprocess.run(['git', 'add', '-A'], check=True, cwd=path)
-    subprocess.run(['git', 'commit', '-m', message], check=True, cwd=path)
     return True
 
 

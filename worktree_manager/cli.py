@@ -110,12 +110,7 @@ def build_parser() -> argparse.ArgumentParser:
     close_all_parser.add_argument(
         '--force',
         action='store_true',
-        help='Close every worktree, including unmerged/dirty/unpushed ones (auto-commits dirty ones)',
-    )
-    close_all_parser.add_argument(
-        '--message',
-        default=None,
-        help='Commit message for auto-commits under --force (default: "wip: close-all")',
+        help='Close every worktree, including unmerged/dirty/unpushed ones (discards uncommitted changes)',
     )
 
     # cleanup-orphans command
@@ -247,7 +242,6 @@ def main() -> int:
             return commands.close_all_cmd(
                 prune=args.prune,
                 force=args.force,
-                message=args.message,
                 assume_yes=not should_prompt(),
             )
         elif args.command == 'cleanup-orphans':

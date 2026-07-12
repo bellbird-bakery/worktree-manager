@@ -38,7 +38,6 @@ from .git_ops import (
     WORKTREE_PREFIX,
     GitError,
     commit_all,
-    commit_all_in_path,
     create_worktree,
     get_branch_for_path,
     get_current_branch,
@@ -470,15 +469,16 @@ class TeardownResult:
     error: str | None = None
 
 
-def _teardown_worktree(entry, project_config, *, prune: bool, message: str) -> TeardownResult:
+def _teardown_worktree(entry, project_config, *, prune: bool) -> TeardownResult:
     """Perform the destructive teardown of a single worktree.
 
-    Shared by ``close`` and ``close-all`` so both run one code path:
+    Used by ``close-all`` for each selected worktree:
 
-    1. Auto-commit if the worktree is dirty (reachable in bulk only under ``--force``).
+    1. Warn (do NOT commit) if the worktree is dirty — its uncommitted changes are
+       discarded on removal. Dirty worktrees are reachable here only under ``--force``.
     2. Fix permissions, then ``compose down`` — removing volumes only when ``prune``.
     3. When ``prune``: drop this worktree's shared DB and flush its shared-Redis DBs.
-    4. Remove the git worktree.
+    4. Remove the git worktree (``--force``, discarding any uncommitted changes).
 
     Registry removal is left to the caller (batched under one lock). Best-effort: any
     error is captured in the returned :class:`TeardownResult` rather than raised.
@@ -486,7 +486,9 @@ def _teardown_worktree(entry, project_config, *, prune: bool, message: str) -> T
     path = entry.path
     try:
         if has_uncommitted_changes_in_path(path):
-            commit_all_in_path(path, message)
+            console.print(
+                f'  [yellow]Warning: {entry.feature_name} has uncommitted changes — discarding them.[/yellow]'
+            )
 
         if is_docker_running():
             fix_permissions(path, entry.compose_project_name)
@@ -965,14 +967,13 @@ def close_worktree(message: str, keep_volumes: bool = False) -> int:
     return 0
 
 
-def close_all_cmd(
-    prune: bool = False, force: bool = False, message: str | None = None, assume_yes: bool = False
-) -> int:
+def close_all_cmd(prune: bool = False, force: bool = False, assume_yes: bool = False) -> int:
     """Close every registered worktree in one pass.
 
     Run from the main repo. By default only worktrees whose branch is merged to the
     base branch and that have no uncommitted changes / unpushed commits are closed;
-    the rest are skipped and reported. ``force`` closes them all. ``prune`` also
+    the rest are skipped and reported. ``force`` closes them all (warning about, and
+    discarding, any uncommitted changes rather than committing them). ``prune`` also
     removes Docker volumes and drops each worktree's shared DB / flushes its
     shared-Redis DBs (mirrors ``close``'s volume removal, which ``close-all`` keeps
     off by default for safety).
@@ -1031,12 +1032,11 @@ def close_all_cmd(
         console.print('Cancelled.')
         return 0
 
-    message = message or 'wip: close-all'
     results = []
     for wt in to_close:
         console.print(f'Closing [cyan]{wt.feature_name}[/cyan] (index {wt.index})...')
         project_config = get_project_config(wt.path)
-        results.append(_teardown_worktree(wt, project_config, prune=prune, message=message))
+        results.append(_teardown_worktree(wt, project_config, prune=prune))
 
     # Batched registry removal: only worktrees that tore down cleanly.
     ok_paths = [wt.path for wt, result in zip(to_close, results, strict=True) if result.ok]
