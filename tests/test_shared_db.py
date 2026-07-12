@@ -44,6 +44,38 @@ def test_set_env_var_preserves_shared_db_port_when_only_that_is_present():
     assert result == 'SHARED_DB_PORT=5432\nDB_PORT=5442\n'
 
 
+# --- _configure_env_ports: shared-DB projects skip the vestigial per-worktree DB_PORT ----
+
+
+def test_configure_env_ports_writes_db_port_for_per_worktree_db():
+    """Non-shared projects still get a per-index DB_PORT and a numeric DB summary."""
+    content = 'WEB_PORT=8000\nDB_PORT=5432\nREDIS_PORT=6379\n'
+    result, summary = commands._configure_env_ports(
+        content, WorktreePorts(web=8010, db=5442, redis=6389), has_shared_db=False
+    )
+    assert 'WEB_PORT=8010\n' in result
+    assert 'DB_PORT=5442\n' in result
+    assert 'REDIS_PORT=6389\n' in result
+    assert summary == 'WEB=8010, DB=5442, REDIS=6389'
+
+
+def test_configure_env_ports_skips_db_port_for_shared_db():
+    """Shared-DB projects must NOT rewrite DB_PORT to a bogus per-index value."""
+    content = 'WEB_PORT=8000\nSHARED_DB_PORT=5432\nDB_PORT=5432\nREDIS_PORT=6379\n'
+    result, summary = commands._configure_env_ports(
+        content, WorktreePorts(web=8010, db=5442, redis=6389), has_shared_db=True
+    )
+    assert 'WEB_PORT=8010\n' in result
+    assert 'REDIS_PORT=6389\n' in result
+    # DB_PORT is left exactly as the template had it — never bumped to the vestigial 5442.
+    assert 'DB_PORT=5442' not in result
+    assert 'DB_PORT=5432\n' in result
+    # SHARED_DB_PORT is the real port and stays global.
+    assert 'SHARED_DB_PORT=5432\n' in result
+    # Summary tells the user the DB is shared, not a fabricated port.
+    assert summary == 'WEB=8010, DB=shared (SHARED_DB_PORT), REDIS=6389'
+
+
 # --- shared_db_name derivation (item 6) -------------------------------------------
 
 

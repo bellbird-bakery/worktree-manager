@@ -166,13 +166,7 @@ def create_worktree_cmd(feature_name: str, branch_type: str | None = 'feature') 
             with open(env_file) as f:
                 content = f.read()
 
-            # Rewrite the per-worktree ports. These are line-anchored so DB_PORT never
-            # clobbers SHARED_DB_PORT: the shared server's port is a global carried
-            # verbatim from .env.example, identical across every worktree, and must not
-            # be rewritten per-index (see HANDOVER-dispatch-guru-shared-db.md, items 1/2).
-            content = _set_env_var(content, 'WEB_PORT', ports.web)
-            content = _set_env_var(content, 'DB_PORT', ports.db)
-            content = _set_env_var(content, 'REDIS_PORT', ports.redis)
+            content, port_summary = _configure_env_ports(content, ports, project_config.has_shared_db())
 
             # Add UID/GID for non-root Docker containers
             uid = os.getuid()
@@ -185,7 +179,7 @@ def create_worktree_cmd(feature_name: str, branch_type: str | None = 'feature') 
             with open(env_file, 'w') as f:
                 f.write(content)
 
-            console.print(f'[green]Created .env with ports WEB={ports.web}, DB={ports.db}, REDIS={ports.redis}[/green]')
+            console.print(f'[green]Created .env with ports {port_summary}[/green]')
         else:
             console.print(f'[yellow]Warning: {project_config.env_template} not found. Create .env manually.[/yellow]')
 
@@ -257,6 +251,30 @@ def _set_env_var(content: str, key: str, value: object) -> str:
     if content and not content.endswith('\n'):
         content += '\n'
     return content + f'{key}={value}\n'
+
+
+def _configure_env_ports(content: str, ports, has_shared_db: bool) -> tuple[str, str]:
+    """Rewrite the per-worktree port assignments in a worktree's .env *content*.
+
+    Returns ``(new_content, summary)`` where ``summary`` is the human-readable
+    ``WEB=.., DB=.., REDIS=..`` line shown on create.
+
+    Assignments are line-anchored (see :func:`_set_env_var`) so DB_PORT never
+    clobbers SHARED_DB_PORT. For shared-DB projects the per-worktree DB port is
+    vestigial: DB_PORT is left exactly as the template had it (never bumped to a
+    bogus per-index value) and the summary reports the DB as shared rather than a
+    fabricated port (see HANDOVER-dispatch-guru-shared-db.md, items 1/2).
+    """
+    content = _set_env_var(content, 'WEB_PORT', ports.web)
+    if has_shared_db:
+        db_summary = 'shared (SHARED_DB_PORT)'
+    else:
+        content = _set_env_var(content, 'DB_PORT', ports.db)
+        db_summary = str(ports.db)
+    content = _set_env_var(content, 'REDIS_PORT', ports.redis)
+
+    summary = f'WEB={ports.web}, DB={db_summary}, REDIS={ports.redis}'
+    return content, summary
 
 
 def _write_env_port(env_file: Path, key: str, value: int) -> None:
