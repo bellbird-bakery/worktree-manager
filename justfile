@@ -28,6 +28,29 @@ bump-major:
 install:
     uv tool install . --force --reinstall
 
+# Install the `wt` shell integration (auto-cd on create/close) into your shell rc.
+# Idempotent: skips if the eval line is already present. Pass an rc path to target
+# a different file, e.g. `just install-shell ~/.zshrc`.
+install-shell rc="":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    rc="{{rc}}"
+    if [ -z "$rc" ]; then
+        case "${SHELL:-}" in
+            *zsh) rc="$HOME/.zshrc" ;;
+            *)    rc="$HOME/.bashrc" ;;
+        esac
+    fi
+    rc="${rc/#\~/$HOME}"
+    line='eval "$(wt shell-init)"'
+    if [ -f "$rc" ] && grep -qF "$line" "$rc"; then
+        echo "Already installed in $rc"
+    else
+        printf '\n# worktree-manager shell integration\n%s\n' "$line" >> "$rc"
+        echo "Added shell integration to $rc"
+        echo "Run 'source $rc' or open a new shell to activate."
+    fi
+
 # Run linter
 lint:
     ruff check .
