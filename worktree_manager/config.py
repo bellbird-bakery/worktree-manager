@@ -91,6 +91,20 @@ DEFAULT_PROJECT_CONFIG: dict[str, Any] = {
     },
     # Production DB restore script, relative to the main repo root (or absolute)
     'db_restore_script': 'database_tools/update_local_restore.sh',
+    # Shared dev-database server (e.g. Dispatch Guru's dg-shared-postgres).
+    # Empty by default: when unset, worktree-manager treats the project as using a
+    # per-worktree DB and none of the shared-DB behaviour (create clone / close drop)
+    # activates. The published port's VALUE is NOT stored here — it lives only in the
+    # project's .env (see HANDOVER-dispatch-guru-shared-db.md, decision 3); only the
+    # env-var NAME is configurable via "port_env_var".
+    'shared_db': {
+        # 'container_name': 'dg-shared-postgres',
+        # 'project_name': 'dg-shared',
+        # 'template_db': 'dg_seed',
+        # 'port_env_var': 'SHARED_DB_PORT',
+        # 'ensure_command': 'just db-ensure',   # clone this worktree's DB from the template
+        # 'drop_command': 'just db-drop-self',  # drop this worktree's DB on close
+    },
     'ports': {
         'web_base': 58000,
         'db_base': 5432,
@@ -239,6 +253,7 @@ class ProjectConfig:
     services: dict = field(default_factory=dict)
     database: dict = field(default_factory=dict)
     db_restore_script: str = 'database_tools/update_local_restore.sh'
+    shared_db: dict = field(default_factory=dict)
     ports: dict = field(default_factory=dict)
     dev_image: str | None = None
     env_template: str = '.env.example'
@@ -290,6 +305,7 @@ class ProjectConfig:
             services=data.get('services', DEFAULT_PROJECT_CONFIG['services']),
             database=data.get('database', DEFAULT_PROJECT_CONFIG['database']),
             db_restore_script=data.get('db_restore_script', DEFAULT_PROJECT_CONFIG['db_restore_script']),
+            shared_db=data.get('shared_db', {}),
             ports=data.get('ports', DEFAULT_PROJECT_CONFIG['ports']),
             dev_image=data.get('dev_image', DEFAULT_PROJECT_CONFIG['dev_image']),
             env_template=data.get('env_template', '.env.example'),
@@ -313,6 +329,7 @@ class ProjectConfig:
             'services': self.services,
             'database': self.database,
             'db_restore_script': self.db_restore_script,
+            'shared_db': self.shared_db,
             'ports': self.ports,
             'dev_image': self.dev_image,
             'env_template': self.env_template,
@@ -337,6 +354,31 @@ class ProjectConfig:
         if script.is_absolute():
             return script
         return Path(main_repo_path) / script
+
+    def has_shared_db(self) -> bool:
+        """Whether this project uses a shared dev-database server.
+
+        True when a non-empty ``shared_db`` block is configured. Gates the
+        shared-DB behaviour (clone on create, drop on close) so per-worktree-DB
+        projects are unaffected.
+        """
+        return bool(self.shared_db)
+
+    def get_shared_db_port_env(self) -> str:
+        """Env-var NAME carrying the shared server's published port (value lives in .env)."""
+        return self.shared_db.get('port_env_var', 'SHARED_DB_PORT')
+
+    def get_shared_db_container(self) -> str | None:
+        """Container name of the shared dev-database server, if configured."""
+        return self.shared_db.get('container_name')
+
+    def get_shared_db_ensure_command(self) -> str | None:
+        """Command that clones this worktree's DB from the template (e.g. ``just db-ensure``)."""
+        return self.shared_db.get('ensure_command')
+
+    def get_shared_db_drop_command(self) -> str | None:
+        """Command that drops this worktree's DB on close (e.g. ``just db-drop-self``)."""
+        return self.shared_db.get('drop_command')
 
     def get_db_service_name(self) -> str:
         """Get the database service name."""

@@ -11,6 +11,12 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
+# Port-related env vars stripped from the shell environment before invoking Compose,
+# so the worktree's .env is authoritative. SHARED_DB_PORT is included because it must
+# come only from .env, identically across every worktree (see
+# HANDOVER-dispatch-guru-shared-db.md, item 8).
+PORT_ENV_SCRUB = ('DB_PORT', 'WEB_PORT', 'POSTGRES_PORT', 'REDIS_PORT', 'SHARED_DB_PORT')
+
 
 class DockerError(Exception):
     """Error from Docker operations."""
@@ -56,6 +62,23 @@ def is_docker_running() -> bool:
         return False
 
 
+def is_container_running(container_name: str) -> bool:
+    """Return True if a container with the given name exists and is running.
+
+    Used to health-gate against the shared dev-database server (e.g.
+    ``dg-shared-postgres``) which lives outside any single worktree's Compose project.
+    """
+    try:
+        result = subprocess.run(
+            ['docker', 'inspect', '-f', '{{.State.Running}}', container_name],
+            capture_output=True,
+            text=True,
+        )
+        return result.returncode == 0 and result.stdout.strip() == 'true'
+    except FileNotFoundError:
+        return False
+
+
 def get_compose_project_name(worktree_path: str) -> str:
     """
     Get the Docker Compose project name for a worktree.
@@ -92,7 +115,7 @@ def compose_up(
     # Build environment, removing port-related vars that might conflict with worktree's .env
     # Shell env vars take precedence over .env file, so we must remove them
     env = os.environ.copy()
-    for var in ('DB_PORT', 'WEB_PORT', 'POSTGRES_PORT', 'REDIS_PORT'):
+    for var in PORT_ENV_SCRUB:
         env.pop(var, None)
     env['COMPOSE_PROJECT_NAME'] = project_name
 
@@ -146,7 +169,7 @@ def compose_down(worktree_path: str, project_name: str, volumes: bool = False) -
 
     # Build environment, removing port-related vars that might conflict with worktree's .env
     env = os.environ.copy()
-    for var in ('DB_PORT', 'WEB_PORT', 'POSTGRES_PORT', 'REDIS_PORT'):
+    for var in PORT_ENV_SCRUB:
         env.pop(var, None)
     env['COMPOSE_PROJECT_NAME'] = project_name
 
@@ -196,7 +219,7 @@ def compose_ps(worktree_path: str, project_name: str) -> list[DockerContainer]:
 
     # Build environment, removing port-related vars that might conflict with worktree's .env
     env = os.environ.copy()
-    for var in ('DB_PORT', 'WEB_PORT', 'POSTGRES_PORT', 'REDIS_PORT'):
+    for var in PORT_ENV_SCRUB:
         env.pop(var, None)
     env['COMPOSE_PROJECT_NAME'] = project_name
 

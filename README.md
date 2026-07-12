@@ -202,6 +202,44 @@ Created per-project with `worktree-manager init`:
 }
 ```
 
+#### Shared dev-database (`shared_db`)
+
+By default each worktree gets its own `db-postgres` container. If your project instead
+runs a single **shared** dev-Postgres server and gives each worktree its own database on
+it (cloned from a template), add a `shared_db` block:
+
+```json
+{
+  "shared_db": {
+    "container_name": "dg-shared-postgres",
+    "ensure_command": "just db-ensure",
+    "drop_command": "just db-drop-self",
+    "port_env_var": "SHARED_DB_PORT"
+  }
+}
+```
+
+When present, worktree-manager:
+
+- **On `create`** — after writing `.env`, runs `ensure_command` (gated behind
+  `docker_settings.auto_build`) to clone this worktree's database from the template, so
+  second-and-later worktrees come up in seconds. Best-effort: creation still succeeds if
+  it can't provision (e.g. the one-time host seed hasn't been run yet).
+- **On `close`** — runs `drop_command` to drop this worktree's database from the shared
+  server (it isn't a per-worktree volume, so it would otherwise be orphaned). Skipped with
+  `--keep-volumes`.
+- Stops treating the per-worktree `DB_PORT` as a real port (it's vestigial), so the shared
+  server on `5432` is never reported as a false conflict.
+
+The database name for a worktree is its `COMPOSE_PROJECT_NAME` with hyphens turned into
+underscores (e.g. `wt-foo-bar` → `wt_foo_bar`).
+
+> The shared server's **published port** is deliberately *not* stored here. It must be
+> identical across every worktree, so it lives only in `.env` / `.env.example` as
+> `SHARED_DB_PORT` (the `port_env_var` above just names which variable to read). The
+> one-time host setup that builds the template (e.g. `just seed-shared`) is a manual step —
+> worktree-manager never runs it for you.
+
 ### Global Configuration (`~/.config/worktree-manager/config.json`)
 
 User-specific settings:

@@ -13,6 +13,12 @@ BASE_WEB_PORT = 58000
 BASE_DB_PORT = 5432
 BASE_REDIS_PORT = 6379
 
+# Environment variable naming the shared dev Postgres server's published port.
+# Its VALUE lives only in the project's .env / .env.example and must be identical
+# across every worktree (one shared server). worktree-manager never allocates it
+# per-index. See HANDOVER-dispatch-guru-shared-db.md.
+SHARED_DB_PORT_ENV = 'SHARED_DB_PORT'
+
 # Default project name - None means auto-detect from git/directory
 DEFAULT_PROJECT_NAME = None
 

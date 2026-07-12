@@ -81,9 +81,14 @@ def is_port_in_use(port: int) -> tuple[bool, str | None, int | None]:
     return (True, process_name, process_pid)
 
 
-def check_port_conflicts(web_port: int, db_port: int, redis_port: int | None = None) -> list[PortConflict]:
+def check_port_conflicts(web_port: int, db_port: int | None, redis_port: int | None = None) -> list[PortConflict]:
     """
     Check for port conflicts with the given ports.
+
+    Pass ``db_port=None`` to skip the database-port check entirely. For projects
+    on a shared dev-database server the per-worktree DB port is vestigial and its
+    "conflict" would be a false positive against the shared server (see
+    HANDOVER-dispatch-guru-shared-db.md, item 2).
 
     Returns:
         List of PortConflict objects for any conflicts found.
@@ -96,9 +101,10 @@ def check_port_conflicts(web_port: int, db_port: int, redis_port: int | None = N
         conflicts.append(PortConflict(port=web_port, port_type='web', process_name=proc_name, process_pid=proc_pid))
 
     # Check db port
-    in_use, proc_name, proc_pid = is_port_in_use(db_port)
-    if in_use:
-        conflicts.append(PortConflict(port=db_port, port_type='db', process_name=proc_name, process_pid=proc_pid))
+    if db_port is not None:
+        in_use, proc_name, proc_pid = is_port_in_use(db_port)
+        if in_use:
+            conflicts.append(PortConflict(port=db_port, port_type='db', process_name=proc_name, process_pid=proc_pid))
 
     # Check redis port
     if redis_port is not None:
@@ -112,7 +118,7 @@ def check_port_conflicts(web_port: int, db_port: int, redis_port: int | None = N
 
 
 def check_registry_conflicts(
-    web_port: int, db_port: int, redis_port: int | None = None, exclude_path: str | None = None
+    web_port: int, db_port: int | None, redis_port: int | None = None, exclude_path: str | None = None
 ) -> list[PortConflict]:
     """
     Check if ports conflict with other registered worktrees.
@@ -145,7 +151,8 @@ def check_registry_conflicts(
                 )
             )
 
-        if wt.ports.db == db_port:
+        # db_port is None for shared-DB projects (per-worktree DB port is vestigial).
+        if db_port is not None and wt.ports.db == db_port:
             conflicts.append(
                 PortConflict(
                     port=db_port,
@@ -198,14 +205,14 @@ def get_available_ports(registry: Registry) -> WorktreePorts:
 
 
 def validate_ports(
-    web_port: int, db_port: int, redis_port: int | None = None, exclude_path: str | None = None
+    web_port: int, db_port: int | None, redis_port: int | None = None, exclude_path: str | None = None
 ) -> list[PortConflict]:
     """
     Validate that ports are available (not in use and not conflicting with registry).
 
     Args:
         web_port: Web port to validate
-        db_port: Database port to validate
+        db_port: Database port to validate (None to skip, e.g. shared-DB projects)
         redis_port: Redis port to validate (None to skip)
         exclude_path: Optional path to exclude from registry conflict check
 

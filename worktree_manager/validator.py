@@ -109,6 +109,13 @@ def validate_worktree(worktree_path: str, strict_ports: bool = True) -> Validati
     # Load environment variables
     env_vars = load_env_file(worktree_path)
 
+    # Whether this project uses a shared dev-database server. When it does, the
+    # per-worktree DB_PORT is vestigial and the meaningful value is SHARED_DB_PORT.
+    from .config import get_project_config
+
+    project_config = get_project_config(worktree_path)
+    uses_shared_db = project_config.has_shared_db()
+
     # Check 2: WEB_PORT is set
     web_port = env_vars.get('WEB_PORT')
     if not web_port:
@@ -123,9 +130,26 @@ def validate_worktree(worktree_path: str, strict_ports: bool = True) -> Validati
     else:
         report.add(ValidationResult(name='WEB_PORT', passed=True, message=f'WEB_PORT set: {web_port}'))
 
-    # Check 3: DB_PORT is set
+    # Check 3: database port. Shared-DB projects use a single global SHARED_DB_PORT
+    # (identical across worktrees); non-shared projects use a per-worktree DB_PORT.
     db_port = env_vars.get('DB_PORT')
-    if not db_port:
+    if uses_shared_db:
+        shared_port_env = project_config.get_shared_db_port_env()
+        shared_port = env_vars.get(shared_port_env)
+        if shared_port:
+            report.add(
+                ValidationResult(name=shared_port_env, passed=True, message=f'{shared_port_env} set: {shared_port}')
+            )
+        else:
+            report.add(
+                ValidationResult(
+                    name=shared_port_env,
+                    passed=False,
+                    message=f'{shared_port_env} not set in .env (shared dev database)',
+                    is_error=True,
+                )
+            )
+    elif not db_port:
         report.add(
             ValidationResult(
                 name='DB_PORT',
@@ -152,10 +176,12 @@ def validate_worktree(worktree_path: str, strict_ports: bool = True) -> Validati
         report.add(ValidationResult(name='REDIS_PORT', passed=True, message=f'REDIS_PORT set: {redis_port}'))
 
     # Check 4: Port conflicts (if ports are set)
-    if web_port and db_port:
+    if web_port:
         try:
             web_port_int = int(web_port)
-            db_port_int = int(db_port)
+            # The per-worktree DB port is vestigial for shared-DB projects; passing None
+            # skips it so the shared server on 5432 isn't reported as a false conflict.
+            db_port_int = int(db_port) if (db_port and not uses_shared_db) else None
             redis_port_int = int(redis_port) if redis_port else None
 
             # Check for active port conflicts
@@ -216,7 +242,7 @@ def validate_worktree(worktree_path: str, strict_ports: bool = True) -> Validati
             )
         )
 
-    if db_port == '5432':
+    if db_port == '5432' and not uses_shared_db:
         report.add(
             ValidationResult(
                 name='Default DB_PORT',
@@ -296,7 +322,7 @@ def validate_worktree(worktree_path: str, strict_ports: bool = True) -> Validati
                     )
                 )
 
-            if db_port and int(db_port) != entry.ports.db:
+            if db_port and not uses_shared_db and int(db_port) != entry.ports.db:
                 report.add(
                     ValidationResult(
                         name='DB_PORT mismatch',

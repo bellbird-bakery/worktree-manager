@@ -24,6 +24,7 @@ from .docker_ops import (
     compose_ps,
     fix_permissions,
     get_compose_project_name,
+    is_container_running,
     is_docker_running,
     list_project_containers,
     list_project_networks,
@@ -105,6 +106,10 @@ def create_worktree_cmd(feature_name: str, branch_type: str | None = 'feature') 
     if is_worktree():
         console.print('[yellow]Warning: Currently in a worktree. Creating from main repository.[/yellow]')
 
+    from .config import ProjectConfig
+
+    project_config = ProjectConfig.load(repo_path=main_repo)
+
     # Lock registry and allocate ports
     with locked_registry(str(main_repo)) as registry:
         # Check if feature already exists
@@ -124,8 +129,11 @@ def create_worktree_cmd(feature_name: str, branch_type: str | None = 'feature') 
         )
         console.print()
 
-        # Check for port conflicts
-        conflicts = validate_ports(ports.web, ports.db, ports.redis)
+        # Check for port conflicts. For shared-DB projects the per-worktree DB port is
+        # vestigial, so skip it (checking it would false-positive against the shared
+        # server on 5432 — see HANDOVER-dispatch-guru-shared-db.md, item 2).
+        db_port_to_check = None if project_config.has_shared_db() else ports.db
+        conflicts = validate_ports(ports.web, db_port_to_check, ports.redis)
         if conflicts:
             console.print('[red]Port conflicts detected:[/red]')
             for conflict in conflicts:
@@ -147,9 +155,6 @@ def create_worktree_cmd(feature_name: str, branch_type: str | None = 'feature') 
 
         # Create .env file
         console.print('Configuring environment...')
-        from .config import ProjectConfig
-
-        project_config = ProjectConfig.load(repo_path=main_repo)
         env_template = worktree_path / project_config.env_template
         env_file = worktree_path / '.env'
 
@@ -161,23 +166,13 @@ def create_worktree_cmd(feature_name: str, branch_type: str | None = 'feature') 
             with open(env_file) as f:
                 content = f.read()
 
-            # Replace or add port settings
-            import re
-
-            if 'WEB_PORT=' in content:
-                content = re.sub(r'WEB_PORT=\d+', f'WEB_PORT={ports.web}', content)
-            else:
-                content += f'\nWEB_PORT={ports.web}\n'
-
-            if 'DB_PORT=' in content:
-                content = re.sub(r'DB_PORT=\d+', f'DB_PORT={ports.db}', content)
-            else:
-                content += f'DB_PORT={ports.db}\n'
-
-            if 'REDIS_PORT=' in content:
-                content = re.sub(r'REDIS_PORT=\d+', f'REDIS_PORT={ports.redis}', content)
-            else:
-                content += f'REDIS_PORT={ports.redis}\n'
+            # Rewrite the per-worktree ports. These are line-anchored so DB_PORT never
+            # clobbers SHARED_DB_PORT: the shared server's port is a global carried
+            # verbatim from .env.example, identical across every worktree, and must not
+            # be rewritten per-index (see HANDOVER-dispatch-guru-shared-db.md, items 1/2).
+            content = _set_env_var(content, 'WEB_PORT', ports.web)
+            content = _set_env_var(content, 'DB_PORT', ports.db)
+            content = _set_env_var(content, 'REDIS_PORT', ports.redis)
 
             # Add UID/GID for non-root Docker containers
             uid = os.getuid()
@@ -225,6 +220,11 @@ def create_worktree_cmd(feature_name: str, branch_type: str | None = 'feature') 
         else:
             console.print(f'[yellow]{result.hook_name}: {result.message}[/yellow]')
 
+    # Shared dev-DB fast path: clone this worktree's database from the template so
+    # second-and-later worktrees come up in seconds. No-op unless the project configures
+    # a shared_db block; best-effort so create still succeeds if it can't provision.
+    _maybe_ensure_shared_db(worktree_path, compose_project_name, project_config)
+
     console.print()
     console.print(Panel.fit('[bold green]Worktree Created Successfully![/bold green]', border_style='green'))
     console.print()
@@ -242,18 +242,124 @@ def create_worktree_cmd(feature_name: str, branch_type: str | None = 'feature') 
     return 0
 
 
-def _write_env_port(env_file: Path, key: str, value: int) -> None:
-    """Set or replace ``KEY=value`` in a worktree .env file, creating it if needed."""
+def _set_env_var(content: str, key: str, value: object) -> str:
+    """Set or replace ``KEY=value`` on its own line in .env file *content*.
+
+    Matches only a full-line assignment (``^KEY=...$`` in multiline mode) so a key
+    that is a suffix of another is never clobbered — e.g. rewriting ``DB_PORT`` must
+    not touch ``SHARED_DB_PORT`` (see HANDOVER-dispatch-guru-shared-db.md, item 1).
+    """
     import re
 
+    pattern = re.compile(rf'^{re.escape(key)}=.*$', re.MULTILINE)
+    if pattern.search(content):
+        return pattern.sub(lambda _m: f'{key}={value}', content)
+    if content and not content.endswith('\n'):
+        content += '\n'
+    return content + f'{key}={value}\n'
+
+
+def _write_env_port(env_file: Path, key: str, value: int) -> None:
+    """Set or replace ``KEY=value`` in a worktree .env file, creating it if needed."""
     content = env_file.read_text() if env_file.exists() else ''
-    if f'{key}=' in content:
-        content = re.sub(rf'{key}=\d+', f'{key}={value}', content)
+    env_file.write_text(_set_env_var(content, key, value))
+
+
+def shared_db_name(compose_project_name: str) -> str:
+    """Database name for a worktree on the shared dev server.
+
+    Mirrors Dispatch Guru's derivation: the ``COMPOSE_PROJECT_NAME`` lowercased with
+    hyphens turned into underscores (e.g. ``wt-foo-bar`` -> ``wt_foo_bar``).
+    """
+    return compose_project_name.lower().replace('-', '_')
+
+
+def _run_worktree_command(worktree_path: Path | str, project_name: str, command: str) -> tuple[bool, str | None]:
+    """Run a shell-style command (e.g. ``just db-ensure``) inside a worktree.
+
+    Sets ``COMPOSE_PROJECT_NAME`` and scrubs port env vars so the worktree's ``.env``
+    stays authoritative, matching how Compose is invoked elsewhere. Output streams to
+    the terminal. Returns ``(success, error_message)``.
+    """
+    import shlex
+
+    from .docker_ops import PORT_ENV_SCRUB
+
+    env = os.environ.copy()
+    for var in PORT_ENV_SCRUB:
+        env.pop(var, None)
+    env['COMPOSE_PROJECT_NAME'] = project_name
+
+    try:
+        result = subprocess.run(shlex.split(command), cwd=str(worktree_path), env=env)
+    except (FileNotFoundError, OSError) as e:
+        return False, str(e)
+    if result.returncode == 0:
+        return True, None
+    return False, f'`{command}` exited with status {result.returncode}'
+
+
+def _maybe_ensure_shared_db(worktree_path: Path, project_name: str, project_config) -> None:
+    """Clone this worktree's DB from the shared server's template (item 4 fast path).
+
+    Best-effort and gated behind docker ``auto_build``: on success a fresh worktree's
+    database is ready in ~1s (no container boot, no restore). A no-op unless the project
+    configures a ``shared_db`` block with an ``ensure_command``. Never runs the one-time
+    host seed (``just seed-shared``) — that stays a manual host-setup step.
+    """
+    from .config import get_config
+
+    if not project_config.has_shared_db():
+        return
+    ensure_cmd = project_config.get_shared_db_ensure_command()
+    if not ensure_cmd:
+        return
+    if not get_config().get_docker_setting('auto_build', True):
+        console.print('[dim]Skipping shared-DB clone (docker auto_build disabled). Run `just up` later.[/dim]')
+        return
+    if not is_docker_running():
+        console.print(
+            '[yellow]Docker not running; skipping shared-DB clone. Run `just up` in the worktree later.[/yellow]'
+        )
+        return
+
+    console.print(f'Provisioning worktree database ([cyan]{ensure_cmd}[/cyan])...')
+    ok, err = _run_worktree_command(worktree_path, project_name, ensure_cmd)
+    if ok:
+        console.print(f'[green]Worktree database ready: {shared_db_name(project_name)}[/green]')
     else:
-        if content and not content.endswith('\n'):
-            content += '\n'
-        content += f'{key}={value}\n'
-    env_file.write_text(content)
+        console.print(f'[yellow]Could not provision shared database: {err}[/yellow]')
+        console.print(
+            '[dim]If the template is missing, run `just seed-shared` once on this host, then `just up`.[/dim]'
+        )
+
+
+def _maybe_drop_shared_db(worktree_path: Path | str, entry, project_config, keep_volumes: bool) -> None:
+    """Drop this worktree's database from the shared server on close (item 6).
+
+    Unlike a per-worktree Docker volume, the shared-server DB isn't removed by
+    ``compose down -v``, so it would be orphaned. A no-op unless the project configures
+    a ``shared_db`` block with a ``drop_command``, or when ``keep_volumes`` is set.
+    """
+    if keep_volumes or not project_config.has_shared_db():
+        return
+    drop_cmd = project_config.get_shared_db_drop_command()
+    if not drop_cmd:
+        return
+
+    db_name = shared_db_name(entry.compose_project_name)
+    if not is_docker_running():
+        console.print(
+            f'[yellow]Docker not running; skipping shared-DB drop. Database {db_name} may be orphaned.[/yellow]'
+        )
+        return
+
+    console.print(f'Dropping shared database [cyan]{db_name}[/cyan] ([cyan]{drop_cmd}[/cyan])...')
+    ok, err = _run_worktree_command(worktree_path, entry.compose_project_name, drop_cmd)
+    if ok:
+        console.print('[green]Shared database dropped[/green]')
+    else:
+        console.print(f'[yellow]Could not drop shared database ({db_name}): {err}[/yellow]')
 
 
 def backfill_redis_ports_cmd(dry_run: bool = False) -> int:
@@ -569,6 +675,16 @@ def close_worktree(message: str, keep_volumes: bool = False) -> int:
     if not entry:
         console.print('[yellow]Warning: Worktree not found in registry.[/yellow]')
 
+    from .config import get_project_config
+
+    project_config = get_project_config(current_path)
+    drops_shared_db = (
+        entry is not None
+        and not keep_volumes
+        and project_config.has_shared_db()
+        and bool(project_config.get_shared_db_drop_command())
+    )
+
     console.print(f'Path: [cyan]{current_path}[/cyan]')
     console.print(f'Branch: [cyan]{get_current_branch()}[/cyan]')
     console.print()
@@ -580,6 +696,10 @@ def close_worktree(message: str, keep_volumes: bool = False) -> int:
         console.print('  - Stop Docker containers (keeping volumes)')
     else:
         console.print('  - Stop Docker containers and remove their volumes')
+    if drops_shared_db:
+        console.print(
+            f"  - Drop this worktree's database ({shared_db_name(entry.compose_project_name)}) on the shared server"
+        )
     console.print('  - Remove the worktree directory')
     console.print('  - Remove from registry')
     console.print()
@@ -625,6 +745,11 @@ def close_worktree(message: str, keep_volumes: bool = False) -> int:
                 console.print('[green]Containers stopped and volumes removed[/green]')
         except DockerError as e:
             console.print(f'[yellow]Warning: {e}[/yellow]')
+
+    # Step 2b: Drop this worktree's database on the shared dev server (if any). Must run
+    # while the worktree (and its justfile) still exists, before removal below.
+    if entry:
+        _maybe_drop_shared_db(current_path, entry, project_config, keep_volumes)
 
     # Step 3: Change to main repo (can't remove worktree while in it)
     main_repo = get_main_repo_root()
@@ -1127,7 +1252,10 @@ def load_db_cmd(
             console.print('[red]Error: Current directory is not a registered worktree[/red]')
             return 1
 
-    console.print(f'Target: [cyan]{target.feature_name}[/cyan] (port {target.ports.db})')
+    if project_config.has_shared_db():
+        console.print(f'Target: [cyan]{target.feature_name}[/cyan] (db {shared_db_name(target.compose_project_name)})')
+    else:
+        console.print(f'Target: [cyan]{target.feature_name}[/cyan] (port {target.ports.db})')
     console.print(f'Path: [dim]{target.path}[/dim]')
     console.print()
 
@@ -1141,14 +1269,22 @@ def load_db_cmd(
         console.print('[dim]Set "db_restore_script" in .worktree-manager.json to point at your restore script.[/dim]')
         return 1
 
-    # Check if postgres container is running
-    containers = compose_ps(target.path, target.compose_project_name)
-    db_containers = [c for c in containers if 'db' in c.name.lower() or 'postgres' in c.name.lower()]
-    db_running = any(c.status.lower() == 'running' for c in db_containers)
-    if not db_running:
-        console.print('[red]Error: Database container is not running[/red]')
-        console.print(f'[dim]Start the worktree containers first: cd {target.path} && just up[/dim]')
-        return 1
+    # Check the database is reachable. For shared-DB projects the dev database lives on
+    # the external shared server (e.g. dg-shared-postgres), not a per-worktree container.
+    if project_config.has_shared_db():
+        container = project_config.get_shared_db_container()
+        if container and not is_container_running(container):
+            console.print(f'[red]Error: shared database container {container!r} is not running[/red]')
+            console.print('[dim]Start it first: `just db-shared-up` (or `just up` in the worktree).[/dim]')
+            return 1
+    else:
+        containers = compose_ps(target.path, target.compose_project_name)
+        db_containers = [c for c in containers if 'db' in c.name.lower() or 'postgres' in c.name.lower()]
+        db_running = any(c.status.lower() == 'running' for c in db_containers)
+        if not db_running:
+            console.print('[red]Error: Database container is not running[/red]')
+            console.print(f'[dim]Start the worktree containers first: cd {target.path} && just up[/dim]')
+            return 1
 
     # Build flags - by default we skip dump and backup for speed
     flags = []
@@ -1181,7 +1317,19 @@ def load_db_cmd(
     # Build environment
     env = os.environ.copy()
     env['DG_PATH'] = target.path
-    env['LOCAL_DB_PORT'] = str(target.ports.db)
+    if project_config.has_shared_db():
+        # The restore script targets the shared container and derives the DB from the
+        # worktree name; it reads the shared port (not a per-worktree DB_PORT). Pass the
+        # global SHARED_DB_PORT from this worktree's .env; let the script default it if
+        # absent (see HANDOVER-dispatch-guru-shared-db.md, item 3).
+        from .validator import load_env_file
+
+        port_env = project_config.get_shared_db_port_env()
+        shared_port = load_env_file(target.path).get(port_env)
+        if shared_port:
+            env[port_env] = shared_port
+    else:
+        env['LOCAL_DB_PORT'] = str(target.ports.db)
 
     # Run script
     try:
