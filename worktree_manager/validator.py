@@ -115,6 +115,7 @@ def validate_worktree(worktree_path: str, strict_ports: bool = True) -> Validati
 
     project_config = get_project_config(worktree_path)
     uses_shared_db = project_config.has_shared_db()
+    uses_shared_redis = project_config.has_shared_redis()
 
     # Check 2: WEB_PORT is set
     web_port = env_vars.get('WEB_PORT')
@@ -161,9 +162,29 @@ def validate_worktree(worktree_path: str, strict_ports: bool = True) -> Validati
     else:
         report.add(ValidationResult(name='DB_PORT', passed=True, message=f'DB_PORT set: {db_port}'))
 
-    # Check 3b: REDIS_PORT is set
+    # Check 3b: Redis. Shared-Redis projects retire the per-worktree REDIS_PORT in
+    # favour of a single global SHARED_REDIS_PORT plus per-worktree logical DB numbers;
+    # non-shared projects still use a per-worktree REDIS_PORT.
     redis_port = env_vars.get('REDIS_PORT')
-    if not redis_port:
+    if uses_shared_redis:
+        shared_redis_env = project_config.get_shared_redis_port_env()
+        shared_redis_port = env_vars.get(shared_redis_env)
+        if shared_redis_port:
+            report.add(
+                ValidationResult(
+                    name=shared_redis_env, passed=True, message=f'{shared_redis_env} set: {shared_redis_port}'
+                )
+            )
+        else:
+            report.add(
+                ValidationResult(
+                    name=shared_redis_env,
+                    passed=False,
+                    message=f'{shared_redis_env} not set in .env (shared dev Redis)',
+                    is_error=True,
+                )
+            )
+    elif not redis_port:
         report.add(
             ValidationResult(
                 name='REDIS_PORT',
@@ -182,7 +203,9 @@ def validate_worktree(worktree_path: str, strict_ports: bool = True) -> Validati
             # The per-worktree DB port is vestigial for shared-DB projects; passing None
             # skips it so the shared server on 5432 isn't reported as a false conflict.
             db_port_int = int(db_port) if (db_port and not uses_shared_db) else None
-            redis_port_int = int(redis_port) if redis_port else None
+            # Shared-Redis projects have no per-worktree redis port; passing None skips
+            # the check so the shared server's single port isn't a false conflict.
+            redis_port_int = int(redis_port) if (redis_port and not uses_shared_redis) else None
 
             # Check for active port conflicts
             conflicts = check_port_conflicts(web_port_int, db_port_int, redis_port_int)

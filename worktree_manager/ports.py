@@ -174,6 +174,17 @@ def check_registry_conflicts(
     return conflicts
 
 
+def redis_dbs_for_index(index: int) -> tuple[int, int]:
+    """Two logical Redis DBs per worktree: ``(broker, cache/channels)``.
+
+    One shared Redis server is isolated per worktree by logical DB number instead
+    of a per-worktree published port. Worktree ``index`` owns DBs ``{2*index,
+    2*index+1}`` so no two worktrees ever share a DB. Index 0 (the main checkout)
+    gets ``(0, 1)``.
+    """
+    return (2 * index, 2 * index + 1)
+
+
 def calculate_ports_for_index(index: int) -> WorktreePorts:
     """
     Calculate ports for a given worktree index.

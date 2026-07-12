@@ -177,7 +177,8 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     backfill_parser = subparsers.add_parser(
-        'backfill-ports', help='Assign a unique REDIS_PORT to existing worktrees that lack one'
+        'backfill-ports',
+        help='Assign Redis logical DB indices (REDIS_BROKER_DB/REDIS_CACHE_DB) to existing worktrees',
     )
     backfill_parser.add_argument(
         '--dry-run',

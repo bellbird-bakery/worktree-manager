@@ -105,6 +105,19 @@ DEFAULT_PROJECT_CONFIG: dict[str, Any] = {
         # 'ensure_command': 'just db-ensure',   # clone this worktree's DB from the template
         # 'drop_command': 'just db-drop-self',  # drop this worktree's DB on close
     },
+    # Shared dev-Redis server (e.g. Dispatch Guru's dg-shared-redis). Mirrors
+    # ``shared_db``: empty by default, so per-worktree-Redis projects are unaffected.
+    # When configured, worktrees are isolated by logical Redis DB number (two DBs
+    # each: broker + cache/channels) instead of a per-worktree published port; the
+    # per-worktree REDIS_PORT is retired and REDIS_BROKER_DB/REDIS_CACHE_DB are
+    # written to .env instead. Only the port env-var NAME is configurable; the
+    # published port's VALUE lives in the project's .env.
+    'shared_redis': {
+        # 'container_name': 'dg-shared-redis',
+        # 'port_env_var': 'SHARED_REDIS_PORT',
+        # 'ensure_command': 'just redis-shared-up',  # bring up the shared Redis server
+        # 'flush_command': 'just redis-flush-self',  # flush this worktree's DBs on close
+    },
     'ports': {
         'web_base': 58000,
         'db_base': 5432,
@@ -254,6 +267,7 @@ class ProjectConfig:
     database: dict = field(default_factory=dict)
     db_restore_script: str = 'database_tools/update_local_restore.sh'
     shared_db: dict = field(default_factory=dict)
+    shared_redis: dict = field(default_factory=dict)
     ports: dict = field(default_factory=dict)
     dev_image: str | None = None
     env_template: str = '.env.example'
@@ -306,6 +320,7 @@ class ProjectConfig:
             database=data.get('database', DEFAULT_PROJECT_CONFIG['database']),
             db_restore_script=data.get('db_restore_script', DEFAULT_PROJECT_CONFIG['db_restore_script']),
             shared_db=data.get('shared_db', {}),
+            shared_redis=data.get('shared_redis', {}),
             ports=data.get('ports', DEFAULT_PROJECT_CONFIG['ports']),
             dev_image=data.get('dev_image', DEFAULT_PROJECT_CONFIG['dev_image']),
             env_template=data.get('env_template', '.env.example'),
@@ -330,6 +345,7 @@ class ProjectConfig:
             'database': self.database,
             'db_restore_script': self.db_restore_script,
             'shared_db': self.shared_db,
+            'shared_redis': self.shared_redis,
             'ports': self.ports,
             'dev_image': self.dev_image,
             'env_template': self.env_template,
@@ -379,6 +395,31 @@ class ProjectConfig:
     def get_shared_db_drop_command(self) -> str | None:
         """Command that drops this worktree's DB on close (e.g. ``just db-drop-self``)."""
         return self.shared_db.get('drop_command')
+
+    def has_shared_redis(self) -> bool:
+        """Whether this project uses a shared dev-Redis server.
+
+        True when a non-empty ``shared_redis`` block is configured. Gates the
+        shared-Redis behaviour (allocate logical DB indices instead of a
+        per-worktree REDIS_PORT) so per-worktree-Redis projects are unaffected.
+        """
+        return bool(self.shared_redis)
+
+    def get_shared_redis_port_env(self) -> str:
+        """Env-var NAME carrying the shared Redis server's published port (value lives in .env)."""
+        return self.shared_redis.get('port_env_var', 'SHARED_REDIS_PORT')
+
+    def get_shared_redis_container(self) -> str | None:
+        """Container name of the shared dev-Redis server, if configured."""
+        return self.shared_redis.get('container_name')
+
+    def get_shared_redis_ensure_command(self) -> str | None:
+        """Command that brings up the shared Redis server (e.g. ``just redis-shared-up``)."""
+        return self.shared_redis.get('ensure_command')
+
+    def get_shared_redis_flush_command(self) -> str | None:
+        """Command that flushes this worktree's Redis DBs on close (e.g. ``just redis-flush-self``)."""
+        return self.shared_redis.get('flush_command')
 
     def get_db_service_name(self) -> str:
         """Get the database service name."""

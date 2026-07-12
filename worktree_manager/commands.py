@@ -17,7 +17,6 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
-from . import BASE_REDIS_PORT
 from .docker_ops import (
     DockerError,
     compose_down,
@@ -47,7 +46,7 @@ from .git_ops import (
     remove_worktree,
     validate_feature_name,
 )
-from .ports import calculate_ports_for_index, is_port_in_use, validate_ports
+from .ports import calculate_ports_for_index, redis_dbs_for_index, validate_ports
 from .registry import Registry, WorktreeEntry, locked_registry, read_registry
 from .validator import validate_worktree
 
@@ -124,8 +123,13 @@ def create_worktree_cmd(feature_name: str, branch_type: str | None = 'feature') 
 
         console.print(f'Feature: [cyan]{feature_name}[/cyan]')
         console.print(f'Index: [cyan]{next_index}[/cyan]')
+        if project_config.has_shared_redis():
+            broker_db, cache_db = redis_dbs_for_index(next_index)
+            redis_display = f'shared DB {broker_db}/{cache_db}'
+        else:
+            redis_display = str(ports.redis)
         console.print(
-            f'Ports: WEB=[cyan]{ports.web}[/cyan], DB=[cyan]{ports.db}[/cyan], REDIS=[cyan]{ports.redis}[/cyan]'
+            f'Ports: WEB=[cyan]{ports.web}[/cyan], DB=[cyan]{ports.db}[/cyan], REDIS=[cyan]{redis_display}[/cyan]'
         )
         console.print()
 
@@ -133,7 +137,11 @@ def create_worktree_cmd(feature_name: str, branch_type: str | None = 'feature') 
         # vestigial, so skip it (checking it would false-positive against the shared
         # server on 5432 — see HANDOVER-dispatch-guru-shared-db.md, item 2).
         db_port_to_check = None if project_config.has_shared_db() else ports.db
-        conflicts = validate_ports(ports.web, db_port_to_check, ports.redis)
+        # For shared-Redis projects the per-worktree REDIS_PORT is retired (worktrees
+        # are isolated by logical DB number), so skip the redis-port conflict check —
+        # the shared server's single port would otherwise false-positive across worktrees.
+        redis_port_to_check = None if project_config.has_shared_redis() else ports.redis
+        conflicts = validate_ports(ports.web, db_port_to_check, redis_port_to_check)
         if conflicts:
             console.print('[red]Port conflicts detected:[/red]')
             for conflict in conflicts:
@@ -166,7 +174,13 @@ def create_worktree_cmd(feature_name: str, branch_type: str | None = 'feature') 
             with open(env_file) as f:
                 content = f.read()
 
-            content, port_summary = _configure_env_ports(content, ports, project_config.has_shared_db())
+            content, port_summary = _configure_env_ports(
+                content,
+                ports,
+                project_config.has_shared_db(),
+                has_shared_redis=project_config.has_shared_redis(),
+                index=next_index,
+            )
 
             # Add UID/GID for non-root Docker containers
             uid = os.getuid()
@@ -253,7 +267,13 @@ def _set_env_var(content: str, key: str, value: object) -> str:
     return content + f'{key}={value}\n'
 
 
-def _configure_env_ports(content: str, ports, has_shared_db: bool) -> tuple[str, str]:
+def _configure_env_ports(
+    content: str,
+    ports,
+    has_shared_db: bool,
+    has_shared_redis: bool = False,
+    index: int | None = None,
+) -> tuple[str, str]:
     """Rewrite the per-worktree port assignments in a worktree's .env *content*.
 
     Returns ``(new_content, summary)`` where ``summary`` is the human-readable
@@ -264,6 +284,11 @@ def _configure_env_ports(content: str, ports, has_shared_db: bool) -> tuple[str,
     vestigial: DB_PORT is left exactly as the template had it (never bumped to a
     bogus per-index value) and the summary reports the DB as shared rather than a
     fabricated port (see HANDOVER-dispatch-guru-shared-db.md, items 1/2).
+
+    For shared-Redis projects the per-worktree REDIS_PORT is likewise retired:
+    the worktree is isolated by two logical Redis DB numbers derived from its
+    ``index`` (``REDIS_BROKER_DB``/``REDIS_CACHE_DB``) written in place of
+    REDIS_PORT.
     """
     content = _set_env_var(content, 'WEB_PORT', ports.web)
     if has_shared_db:
@@ -271,16 +296,49 @@ def _configure_env_ports(content: str, ports, has_shared_db: bool) -> tuple[str,
     else:
         content = _set_env_var(content, 'DB_PORT', ports.db)
         db_summary = str(ports.db)
-    content = _set_env_var(content, 'REDIS_PORT', ports.redis)
 
-    summary = f'WEB={ports.web}, DB={db_summary}, REDIS={ports.redis}'
+    if has_shared_redis:
+        broker_db, cache_db = redis_dbs_for_index(index if index is not None else 0)
+        content = _remove_env_var(content, 'REDIS_PORT')
+        content = _set_env_var(content, 'REDIS_BROKER_DB', broker_db)
+        content = _set_env_var(content, 'REDIS_CACHE_DB', cache_db)
+        content = _comment_out_stale_redis_urls(content)
+        redis_summary = f'shared (DB {broker_db}/{cache_db})'
+    else:
+        content = _set_env_var(content, 'REDIS_PORT', ports.redis)
+        redis_summary = str(ports.redis)
+
+    summary = f'WEB={ports.web}, DB={db_summary}, REDIS={redis_summary}'
     return content, summary
 
 
-def _write_env_port(env_file: Path, key: str, value: int) -> None:
-    """Set or replace ``KEY=value`` in a worktree .env file, creating it if needed."""
-    content = env_file.read_text() if env_file.exists() else ''
-    env_file.write_text(_set_env_var(content, key, value))
+def _remove_env_var(content: str, key: str) -> str:
+    """Delete a full-line ``KEY=value`` assignment (and its newline) from .env *content*.
+
+    Line-anchored like :func:`_set_env_var` so ``REDIS_PORT`` never removes a line
+    that merely contains that substring (e.g. ``SHARED_REDIS_PORT``).
+    """
+    import re
+
+    pattern = re.compile(rf'^{re.escape(key)}=.*\n?', re.MULTILINE)
+    return pattern.sub('', content)
+
+
+def _comment_out_stale_redis_urls(content: str) -> str:
+    """Comment out full-URL Redis overrides that point at the CI-only ``redis`` host.
+
+    ``CELERY_BROKER_URL``/``REDIS_URL`` full-URL overrides WIN over the composed
+    ``REDIS_HOST``/``*_DB`` parts, so an active ``redis://redis:...`` line left in a
+    migrated worktree silently breaks celery (the ``redis`` service is now CI-only).
+    Only ACTIVE (uncommented) lines whose value uses the ``redis`` hostname are
+    neutralised; overrides on any other host (``localhost``, ``host.docker.internal``)
+    are preserved. ``CELERY_RESULT_BACKEND`` is dead (settings hardcode ``django-db``)
+    and is left untouched.
+    """
+    import re
+
+    pattern = re.compile(r'^(CELERY_BROKER_URL|REDIS_URL)=redis://redis:.*$', re.MULTILINE)
+    return pattern.sub(lambda m: f'# {m.group(0)}', content)
 
 
 def shared_db_name(compose_project_name: str) -> str:
@@ -380,15 +438,33 @@ def _maybe_drop_shared_db(worktree_path: Path | str, entry, project_config, keep
         console.print(f'[yellow]Could not drop shared database ({db_name}): {err}[/yellow]')
 
 
+def _migrate_env_redis(content: str, broker_db: int, cache_db: int) -> str:
+    """Migrate a worktree's .env *content* from a per-worktree REDIS_PORT to logical DBs.
+
+    Idempotent: removes any ``REDIS_PORT`` line, writes ``REDIS_BROKER_DB``/
+    ``REDIS_CACHE_DB``, and comments out any active ``redis://redis:...`` full-URL
+    override (which would otherwise WIN over the composed parts and point celery at
+    the now-CI-only ``redis`` host). Overrides on other hosts are preserved.
+    """
+    content = _remove_env_var(content, 'REDIS_PORT')
+    content = _set_env_var(content, 'REDIS_BROKER_DB', broker_db)
+    content = _set_env_var(content, 'REDIS_CACHE_DB', cache_db)
+    content = _comment_out_stale_redis_urls(content)
+    return content
+
+
 def backfill_redis_ports_cmd(dry_run: bool = False) -> int:
     """
-    Assign a unique REDIS_PORT to existing worktrees created before Redis port allocation.
+    Assign Redis logical DB indices to existing worktrees (replaces REDIS_PORT).
 
-    For each registered worktree whose stored redis port is unset (0), allocate a unique
-    port (base 6379 + index, or the next free port) and write REDIS_PORT into its .env.
+    For each registered worktree, derive its two logical Redis DBs from its
+    monotonic ``index`` (``REDIS_BROKER_DB=2*index``, ``REDIS_CACHE_DB=2*index+1``),
+    write them into its .env, remove the retired ``REDIS_PORT`` line, and comment out
+    any active ``redis://redis:...`` full-URL override that would silently break
+    celery against the now-CI-only ``redis`` host.
     """
     console.print()
-    console.print(Panel.fit('[bold]Backfilling REDIS_PORT[/bold]', border_style='blue'))
+    console.print(Panel.fit('[bold]Migrating worktrees to Redis logical DB indices[/bold]', border_style='blue'))
     console.print()
 
     try:
@@ -398,44 +474,34 @@ def backfill_redis_ports_cmd(dry_run: bool = False) -> int:
         return 1
 
     with locked_registry(str(main_repo)) as registry:
-        # Ports already claimed by worktrees that have a redis port set.
-        used = {wt.ports.redis for wt in registry.worktrees if wt.ports.redis}
-        missing = [wt for wt in registry.worktrees if not wt.ports.redis]
-
-        if not missing:
-            console.print('[green]All worktrees already have a REDIS_PORT. Nothing to do.[/green]')
+        worktrees = list(registry.worktrees)
+        if not worktrees:
+            console.print('[green]No registered worktrees. Nothing to do.[/green]')
             return 0
 
-        for wt in missing:
-            candidate = BASE_REDIS_PORT + wt.index
-            # Skip ports already claimed by another worktree or in use on the host.
-            while candidate in used or is_port_in_use(candidate)[0]:
-                candidate += 1
-            used.add(candidate)
-
+        for wt in worktrees:
+            broker_db, cache_db = redis_dbs_for_index(wt.index)
             env_file = Path(wt.path) / '.env'
-            console.print(f'  [cyan]{wt.feature_name}[/cyan] (index {wt.index}) -> REDIS_PORT={candidate}')
+            console.print(
+                f'  [cyan]{wt.feature_name}[/cyan] (index {wt.index}) -> '
+                f'REDIS_BROKER_DB={broker_db}, REDIS_CACHE_DB={cache_db} (REDIS_PORT removed)'
+            )
 
             if dry_run:
                 continue
 
-            wt.ports.redis = candidate
             try:
-                _write_env_port(env_file, 'REDIS_PORT', candidate)
+                content = env_file.read_text() if env_file.exists() else ''
+                env_file.write_text(_migrate_env_redis(content, broker_db, cache_db))
             except OSError as e:
                 console.print(f'    [yellow]Warning: could not update {env_file}: {e}[/yellow]')
 
-        if dry_run:
-            console.print()
-            console.print('[yellow]Dry run - no changes written.[/yellow]')
-            # Discard in-memory changes so the lock's write-back is a no-op relative to on-disk.
-            # (redis ports were never mutated in dry-run, so nothing to revert.)
-
     console.print()
     if dry_run:
-        console.print(f'[bold]{len(missing)} worktree(s) would be updated.[/bold]')
+        console.print('[yellow]Dry run - no changes written.[/yellow]')
+        console.print(f'[bold]{len(worktrees)} worktree(s) would be updated.[/bold]')
     else:
-        console.print(f'[bold green]Backfilled REDIS_PORT for {len(missing)} worktree(s).[/bold green]')
+        console.print(f'[bold green]Migrated {len(worktrees)} worktree(s) to Redis logical DB indices.[/bold green]')
     return 0
 
 
