@@ -197,6 +197,7 @@ Created per-project with `worktree-manager init`:
     "name": "mydb",
     "user": "myuser"
   },
+  "dev_image": "my-project-dev:latest",
   "worktree_dir": "../worktrees"
 }
 ```
@@ -282,6 +283,10 @@ Worktree Manager supports lifecycle hooks that run when a worktree is created or
 
 - **uv sync hook**: Install dependencies in the new worktree
 - **Claude launch hook**: Launch Claude Code in the new worktree
+- **Shared dev image hook**: Build a shared dev Docker image once, on create, if it's
+  missing — so worktrees reuse a single image instead of rebuilding per worktree.
+  Off unless `dev_image` is set in `.worktree-manager.json` (see below); gated by the
+  `auto_build` docker setting and skipped when the image already exists.
 
 Configure hooks in `~/.config/worktree-manager/hooks.json`.
 

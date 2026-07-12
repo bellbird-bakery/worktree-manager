@@ -1,21 +1,27 @@
 """
 Hook configuration management.
 
-Configuration is stored in ~/.config/dispatch-guru/hooks.json
+Configuration is stored in ~/.config/worktree-manager/hooks.json (migrated from the
+legacy ~/.config/dispatch-guru/hooks.json on first load).
 """
 
 from __future__ import annotations
 
 import json
 import logging
+import os
+import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from .. import CONFIG_DIR_NAME, LEGACY_CONFIG_DIR
+
 logger = logging.getLogger('worktree_manager.hooks')
 
-CONFIG_DIR = Path.home() / '.config' / 'dispatch-guru'
+CONFIG_DIR = Path.home() / '.config' / CONFIG_DIR_NAME
 CONFIG_FILE = CONFIG_DIR / 'hooks.json'
+LEGACY_CONFIG_FILE = Path(os.path.expanduser(LEGACY_CONFIG_DIR)) / 'hooks.json'
 
 # Default configuration
 DEFAULT_CONFIG: dict[str, Any] = {
@@ -29,8 +35,23 @@ DEFAULT_CONFIG: dict[str, Any] = {
             'enabled': True,
             'extra_args': [],
         },
+        'shared_image': {
+            'enabled': True,
+        },
     },
 }
+
+
+def _migrate_legacy_hooks_config() -> None:
+    """Copy hooks.json from the legacy dispatch-guru config dir if not yet migrated."""
+    if CONFIG_FILE.exists() or not LEGACY_CONFIG_FILE.exists():
+        return
+    try:
+        CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(LEGACY_CONFIG_FILE, CONFIG_FILE)
+        logger.info(f'Migrated hooks config {LEGACY_CONFIG_FILE} -> {CONFIG_FILE}')
+    except OSError as e:
+        logger.warning(f'Failed to migrate legacy hooks config: {e}')
 
 
 @dataclass
@@ -43,6 +64,7 @@ class HookConfig:
     @classmethod
     def load(cls) -> HookConfig:
         """Load configuration from file or return defaults."""
+        _migrate_legacy_hooks_config()
         if CONFIG_FILE.exists():
             try:
                 with open(CONFIG_FILE) as f:

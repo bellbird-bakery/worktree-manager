@@ -99,6 +99,8 @@ DEFAULT_PROJECT_CONFIG: dict[str, Any] = {
     'env_template': '.env.example',
     'env_vars_required': [],
     'ignore_patterns': [],
+    # Shared dev image tag to ensure exists on worktree create (None = feature off)
+    'dev_image': None,
     'hooks': {
         'post_create': None,
         'pre_close': None,
@@ -238,6 +240,7 @@ class ProjectConfig:
     database: dict = field(default_factory=dict)
     db_restore_script: str = 'database_tools/update_local_restore.sh'
     ports: dict = field(default_factory=dict)
+    dev_image: str | None = None
     env_template: str = '.env.example'
     env_vars_required: list[str] = field(default_factory=list)
     ignore_patterns: list[str] = field(default_factory=list)
@@ -288,6 +291,7 @@ class ProjectConfig:
             database=data.get('database', DEFAULT_PROJECT_CONFIG['database']),
             db_restore_script=data.get('db_restore_script', DEFAULT_PROJECT_CONFIG['db_restore_script']),
             ports=data.get('ports', DEFAULT_PROJECT_CONFIG['ports']),
+            dev_image=data.get('dev_image', DEFAULT_PROJECT_CONFIG['dev_image']),
             env_template=data.get('env_template', '.env.example'),
             env_vars_required=data.get('env_vars_required', []),
             ignore_patterns=data.get('ignore_patterns', []),
@@ -310,6 +314,7 @@ class ProjectConfig:
             'database': self.database,
             'db_restore_script': self.db_restore_script,
             'ports': self.ports,
+            'dev_image': self.dev_image,
             'env_template': self.env_template,
             'env_vars_required': self.env_vars_required,
             'ignore_patterns': self.ignore_patterns,
