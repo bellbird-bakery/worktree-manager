@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import shutil
 import subprocess
 from datetime import datetime
@@ -257,8 +258,6 @@ def _set_env_var(content: str, key: str, value: object) -> str:
     that is a suffix of another is never clobbered — e.g. rewriting ``DB_PORT`` must
     not touch ``SHARED_DB_PORT`` (see HANDOVER-dispatch-guru-shared-db.md, item 1).
     """
-    import re
-
     pattern = re.compile(rf'^{re.escape(key)}=.*$', re.MULTILINE)
     if pattern.search(content):
         return pattern.sub(lambda _m: f'{key}={value}', content)
@@ -318,8 +317,6 @@ def _remove_env_var(content: str, key: str) -> str:
     Line-anchored like :func:`_set_env_var` so ``REDIS_PORT`` never removes a line
     that merely contains that substring (e.g. ``SHARED_REDIS_PORT``).
     """
-    import re
-
     pattern = re.compile(rf'^{re.escape(key)}=.*\n?', re.MULTILINE)
     return pattern.sub('', content)
 
@@ -335,8 +332,6 @@ def _comment_out_stale_redis_urls(content: str) -> str:
     are preserved. ``CELERY_RESULT_BACKEND`` is dead (settings hardcode ``django-db``)
     and is left untouched.
     """
-    import re
-
     pattern = re.compile(r'^(CELERY_BROKER_URL|REDIS_URL)=redis://redis:.*$', re.MULTILINE)
     return pattern.sub(lambda m: f'# {m.group(0)}', content)
 
