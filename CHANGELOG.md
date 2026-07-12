@@ -13,6 +13,15 @@ All notable changes to this project will be documented in this file.
     `REDIS_BROKER_DB`/`REDIS_CACHE_DB` to `.env` (no `REDIS_PORT`), skips the
     per-worktree redis-port conflict check, and the validator checks
     `SHARED_REDIS_PORT` in place of `REDIS_PORT`. A no-op when the block is unset.
+- **`close-all` command** - Close every registered worktree in one pass from the main repo
+  - Safe by default: only closes worktrees whose branch is merged to the base branch
+    with no uncommitted changes and no unpushed commits; the rest are skipped and
+    reported in a plan table with their reason (`unmerged`/`dirty`/`unpushed`)
+  - `--force` closes them all (auto-committing dirty ones); `--prune` additionally
+    removes Docker volumes, drops each worktree's shared database, and flushes its
+    shared-Redis DBs (a no-op unless those blocks are configured)
+  - Shared teardown helper `_teardown_worktree`; single `close` now also flushes the
+    shared-Redis DBs (when configured) for parity with `close-all --prune`
 - **`--raw` flag for `create` command** - Use branch names as-is without `feature/` or `fix/` prefix
   - `worktree-manager create 003-my-branch --raw` creates branch `003-my-branch` directly
 - **Shared dev image hook** - New `shared_image` lifecycle hook builds a shared dev

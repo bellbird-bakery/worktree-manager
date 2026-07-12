@@ -11,6 +11,7 @@ import os
 import re
 import shutil
 import subprocess
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
@@ -37,11 +38,16 @@ from .git_ops import (
     WORKTREE_PREFIX,
     GitError,
     commit_all,
+    commit_all_in_path,
     create_worktree,
+    get_branch_for_path,
     get_current_branch,
     get_main_repo_root,
     get_repo_root,
     has_uncommitted_changes,
+    has_uncommitted_changes_in_path,
+    has_unpushed_commits,
+    is_branch_merged,
     is_worktree,
     list_worktrees,
     remove_worktree,
@@ -433,6 +439,69 @@ def _maybe_drop_shared_db(worktree_path: Path | str, entry, project_config, keep
         console.print(f'[yellow]Could not drop shared database ({db_name}): {err}[/yellow]')
 
 
+def _maybe_flush_shared_redis(worktree_path: Path | str, entry, project_config) -> None:
+    """Flush this worktree's logical Redis DBs on the shared server (prune only).
+
+    Symmetric with :func:`_maybe_drop_shared_db`: the shared-Redis server's logical
+    DBs aren't cleared by ``compose down -v``, so they'd retain this worktree's data.
+    A no-op unless the project configures a ``shared_redis`` block with a
+    ``flush_command``.
+    """
+    flush_cmd = project_config.get_shared_redis_flush_command()
+    if not flush_cmd:
+        return
+    if not is_docker_running():
+        console.print('[yellow]Docker not running; skipping shared-Redis flush.[/yellow]')
+        return
+    console.print(f'Flushing shared Redis ([cyan]{flush_cmd}[/cyan])...')
+    ok, err = _run_worktree_command(worktree_path, entry.compose_project_name, flush_cmd)
+    if ok:
+        console.print('[green]Shared Redis flushed[/green]')
+    else:
+        console.print(f'[yellow]Could not flush shared Redis: {err}[/yellow]')
+
+
+@dataclass
+class TeardownResult:
+    """Outcome of tearing down one worktree."""
+
+    feature_name: str
+    ok: bool
+    error: str | None = None
+
+
+def _teardown_worktree(entry, project_config, *, prune: bool, message: str) -> TeardownResult:
+    """Perform the destructive teardown of a single worktree.
+
+    Shared by ``close`` and ``close-all`` so both run one code path:
+
+    1. Auto-commit if the worktree is dirty (reachable in bulk only under ``--force``).
+    2. Fix permissions, then ``compose down`` — removing volumes only when ``prune``.
+    3. When ``prune``: drop this worktree's shared DB and flush its shared-Redis DBs.
+    4. Remove the git worktree.
+
+    Registry removal is left to the caller (batched under one lock). Best-effort: any
+    error is captured in the returned :class:`TeardownResult` rather than raised.
+    """
+    path = entry.path
+    try:
+        if has_uncommitted_changes_in_path(path):
+            commit_all_in_path(path, message)
+
+        if is_docker_running():
+            fix_permissions(path, entry.compose_project_name)
+            compose_down(path, entry.compose_project_name, volumes=prune)
+
+        if prune:
+            _maybe_drop_shared_db(path, entry, project_config, keep_volumes=False)
+            _maybe_flush_shared_redis(path, entry, project_config)
+
+        remove_worktree(path, force=True)
+    except (GitError, DockerError, OSError) as e:
+        return TeardownResult(feature_name=entry.feature_name, ok=False, error=str(e))
+    return TeardownResult(feature_name=entry.feature_name, ok=True)
+
+
 def _migrate_env_redis(content: str, broker_db: int, cache_db: int) -> str:
     """Migrate a worktree's .env *content* from a per-worktree REDIS_PORT to logical DBs.
 
@@ -712,6 +781,38 @@ def show_status() -> int:
     return 0
 
 
+def _classify_worktrees(worktrees, base_branch: str, force: bool) -> tuple[list, list[tuple]]:
+    """Partition worktrees into (to_close, skipped) by the merged/clean/pushed gate.
+
+    A worktree is safe to close when its branch is merged to ``base_branch`` and it
+    has no uncommitted changes and no unpushed commits. Any worktree failing a
+    predicate is skipped with an ordered list of reason strings
+    (``unmerged``/``dirty``/``unpushed``). ``force`` closes everything, no reasons.
+
+    Returns ``(to_close, skipped)`` where ``skipped`` is a list of
+    ``(entry, reasons)`` tuples.
+    """
+    to_close = []
+    skipped = []
+    for wt in worktrees:
+        if force:
+            to_close.append(wt)
+            continue
+        branch = get_branch_for_path(wt.path)
+        reasons = []
+        if not is_branch_merged(branch, base_branch, repo_path=wt.path):
+            reasons.append('unmerged')
+        if has_uncommitted_changes_in_path(wt.path):
+            reasons.append('dirty')
+        if has_unpushed_commits(wt.path):
+            reasons.append('unpushed')
+        if reasons:
+            skipped.append((wt, reasons))
+        else:
+            to_close.append(wt)
+    return to_close, skipped
+
+
 def close_worktree(message: str, keep_volumes: bool = False) -> int:
     """
     Close the current worktree.
@@ -825,10 +926,13 @@ def close_worktree(message: str, keep_volumes: bool = False) -> int:
         except DockerError as e:
             console.print(f'[yellow]Warning: {e}[/yellow]')
 
-    # Step 2b: Drop this worktree's database on the shared dev server (if any). Must run
-    # while the worktree (and its justfile) still exists, before removal below.
+    # Step 2b: Drop this worktree's database and flush its Redis DBs on the shared dev
+    # server (if any). Must run while the worktree (and its justfile) still exists,
+    # before removal below.
     if entry:
         _maybe_drop_shared_db(current_path, entry, project_config, keep_volumes)
+        if not keep_volumes:
+            _maybe_flush_shared_redis(current_path, entry, project_config)
 
     # Step 3: Change to main repo (can't remove worktree while in it)
     main_repo = get_main_repo_root()
@@ -857,6 +961,103 @@ def close_worktree(message: str, keep_volumes: bool = False) -> int:
 
     # Ask the shell wrapper (if any) to cd back to the main repo.
     _emit_cd_target(main_repo)
+
+    return 0
+
+
+def close_all_cmd(
+    prune: bool = False, force: bool = False, message: str | None = None, assume_yes: bool = False
+) -> int:
+    """Close every registered worktree in one pass.
+
+    Run from the main repo. By default only worktrees whose branch is merged to the
+    base branch and that have no uncommitted changes / unpushed commits are closed;
+    the rest are skipped and reported. ``force`` closes them all. ``prune`` also
+    removes Docker volumes and drops each worktree's shared DB / flushes its
+    shared-Redis DBs (mirrors ``close``'s volume removal, which ``close-all`` keeps
+    off by default for safety).
+    """
+    from .cli import should_prompt
+    from .config import get_project_config
+
+    console.print()
+    console.print(Panel.fit('[bold]Closing All Worktrees[/bold]', border_style='yellow'))
+    console.print()
+
+    # Must run from the main repo (can't delete a worktree we're standing in). Compare
+    # repo roots rather than trusting is_worktree(), which misreports when
+    # `git rev-parse --git-common-dir` returns a relative path.
+    try:
+        current_root = get_repo_root().resolve()
+        main_repo = get_main_repo_root().resolve()
+    except GitError:
+        console.print('[red]Error: Not in a git repository.[/red]')
+        return 1
+    if current_root != main_repo:
+        console.print('[red]Error: Run close-all from the main repository, not inside a worktree.[/red]')
+        console.print(f'[dim]cd to {main_repo} and try again.[/dim]')
+        return 1
+
+    registry = read_registry()
+    worktrees = list(registry.worktrees) if registry else []
+    if not worktrees:
+        console.print('[green]No registered worktrees. Nothing to do.[/green]')
+        return 0
+
+    base_branch = get_project_config(str(main_repo)).base_branch
+    to_close, skipped = _classify_worktrees(worktrees, base_branch, force)
+
+    # Plan
+    table = Table(title='Close-all plan', show_header=True, header_style='bold')
+    table.add_column('Worktree')
+    table.add_column('Index', justify='right')
+    table.add_column('Disposition')
+    for wt in to_close:
+        table.add_row(wt.feature_name, str(wt.index), '[green]close[/green]')
+    for wt, reasons in skipped:
+        table.add_row(wt.feature_name, str(wt.index), f'[yellow]skip: {", ".join(reasons)}[/yellow]')
+    console.print(table)
+    extras = 'remove volumes + drop DB/Redis' if prune else 'keep volumes + data'
+    console.print(f'[dim]Mode: {"force" if force else "safe"} · prune: {extras}[/dim]')
+    console.print()
+
+    if not to_close:
+        console.print('[yellow]No worktrees eligible to close.[/yellow]')
+        if skipped and not force:
+            console.print('[dim]Use --force to close unmerged/dirty/unpushed worktrees anyway.[/dim]')
+        return 0
+
+    if not assume_yes and should_prompt() and console.input('Continue? (yes/no): ').lower() != 'yes':
+        console.print('Cancelled.')
+        return 0
+
+    message = message or 'wip: close-all'
+    results = []
+    for wt in to_close:
+        console.print(f'Closing [cyan]{wt.feature_name}[/cyan] (index {wt.index})...')
+        project_config = get_project_config(wt.path)
+        results.append(_teardown_worktree(wt, project_config, prune=prune, message=message))
+
+    # Batched registry removal: only worktrees that tore down cleanly.
+    ok_paths = [wt.path for wt, result in zip(to_close, results, strict=True) if result.ok]
+    if ok_paths:
+        with locked_registry(str(main_repo)) as reg:
+            for path in ok_paths:
+                reg.remove_worktree(path)
+
+    n_ok = sum(1 for r in results if r.ok)
+    n_err = len(results) - n_ok
+    console.print()
+    summary = f'[bold green]Closed {n_ok} worktree(s)[/bold green]'
+    if skipped:
+        summary += f', [yellow]skipped {len(skipped)}[/yellow]'
+    if n_err:
+        summary += f', [red]{n_err} errored[/red]'
+    console.print(Panel.fit(summary, border_style='green' if not n_err else 'yellow'))
+    for wt, result in zip(to_close, results, strict=True):
+        if not result.ok:
+            console.print(f'  [red]{wt.feature_name}: {result.error}[/red]')
+    console.print()
 
     return 0
 

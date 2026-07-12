@@ -266,6 +266,21 @@ def get_current_branch() -> str:
         return 'unknown'
 
 
+def get_branch_for_path(path: str) -> str:
+    """Get the checked-out branch name for the worktree at *path*."""
+    try:
+        result = subprocess.run(
+            ['git', 'rev-parse', '--abbrev-ref', 'HEAD'],
+            capture_output=True,
+            text=True,
+            check=True,
+            cwd=path,
+        )
+        return result.stdout.strip()
+    except subprocess.CalledProcessError:
+        return 'unknown'
+
+
 def has_uncommitted_changes() -> bool:
     """Check if there are uncommitted changes."""
     try:
@@ -296,6 +311,20 @@ def commit_all(message: str) -> bool:
 
     # Commit
     subprocess.run(['git', 'commit', '-m', message], check=True)
+    return True
+
+
+def commit_all_in_path(path: str, message: str) -> bool:
+    """Stage all changes and commit in the worktree at *path*.
+
+    Path-scoped counterpart to :func:`commit_all` for operating on a worktree other
+    than the current directory. Returns True if a commit was made, False if there
+    was nothing to commit.
+    """
+    if not has_uncommitted_changes_in_path(path):
+        return False
+    subprocess.run(['git', 'add', '-A'], check=True, cwd=path)
+    subprocess.run(['git', 'commit', '-m', message], check=True, cwd=path)
     return True
 
 

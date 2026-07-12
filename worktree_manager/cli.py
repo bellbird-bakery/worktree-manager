@@ -98,6 +98,26 @@ def build_parser() -> argparse.ArgumentParser:
         help='Keep Docker volumes instead of removing them with the containers',
     )
 
+    # close-all command
+    close_all_parser = subparsers.add_parser(
+        'close-all', help='Close all worktrees (safe by default: only merged/clean/pushed)'
+    )
+    close_all_parser.add_argument(
+        '--prune',
+        action='store_true',
+        help="Also remove Docker volumes and drop each worktree's shared database / Redis DBs",
+    )
+    close_all_parser.add_argument(
+        '--force',
+        action='store_true',
+        help='Close every worktree, including unmerged/dirty/unpushed ones (auto-commits dirty ones)',
+    )
+    close_all_parser.add_argument(
+        '--message',
+        default=None,
+        help='Commit message for auto-commits under --force (default: "wip: close-all")',
+    )
+
     # cleanup-orphans command
     cleanup_parser = subparsers.add_parser('cleanup-orphans', help='Clean up orphaned resources')
     cleanup_parser.add_argument(
@@ -223,6 +243,13 @@ def main() -> int:
             return commands.show_status()
         elif args.command == 'close':
             return commands.close_worktree(args.message, keep_volumes=args.keep_volumes)
+        elif args.command == 'close-all':
+            return commands.close_all_cmd(
+                prune=args.prune,
+                force=args.force,
+                message=args.message,
+                assume_yes=not should_prompt(),
+            )
         elif args.command == 'cleanup-orphans':
             return commands.cleanup_orphans(dry_run=args.dry_run)
         elif args.command == 'prune':
