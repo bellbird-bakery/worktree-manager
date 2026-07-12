@@ -23,10 +23,10 @@ bump-major:
     uv version --bump major
     uv tool install . --force
 
-# Install without version bump (clears cache to ensure fresh build)
+# Install without version bump (--reinstall implies --refresh, forcing a fresh
+# build even at the same version — no global `uv cache clean` lock contention)
 install:
-    uv cache clean worktree-manager
-    uv tool install . --force
+    uv tool install . --force --reinstall
 
 # Run linter
 lint:
