@@ -35,6 +35,10 @@ DEFAULT_CONFIG: dict[str, Any] = {
             'enabled': True,
             'extra_args': [],
         },
+        'npm_install': {
+            'enabled': True,
+            'extra_args': [],
+        },
         'shared_image': {
             'enabled': True,
         },
