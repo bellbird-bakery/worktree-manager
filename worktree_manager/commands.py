@@ -65,6 +65,20 @@ console = Console()
 CD_TARGET_ENV = 'WT_CD_FILE'
 
 
+def _current_main_repo() -> str | None:
+    """The main repo for the current directory, or None outside a git repo.
+
+    Used to scope registry reads: the registry is shared by every project on the
+    machine, so a command must say which project it is operating on rather than
+    trusting the file's stored main_repo_path (which only records whichever
+    project ran `wt` last).
+    """
+    try:
+        return str(get_main_repo_root())
+    except GitError:
+        return None
+
+
 def _emit_cd_target(path: Path | str) -> None:
     """Write a directory for the shell wrapper to cd into, if integration is active.
 
@@ -630,7 +644,7 @@ def claude_cmd(
     Returns:
         Exit code (only on failure; on success the process is replaced).
     """
-    registry = read_registry()
+    registry = read_registry(_current_main_repo())
     if not registry or not registry.worktrees:
         console.print('[red]No worktrees registered.[/red]')
         console.print('Create one with: [cyan]worktree-manager create <feature-name>[/cyan]')
@@ -673,7 +687,7 @@ def list_worktrees_cmd() -> int:
     Returns:
         Exit code (0 for success).
     """
-    registry = read_registry()
+    registry = read_registry(_current_main_repo())
 
     console.print()
     console.print(Panel.fit('[bold]Worktree Registry[/bold]', border_style='blue'))
@@ -750,7 +764,7 @@ def show_status() -> int:
     console.print()
 
     # Check registry
-    registry = read_registry()
+    registry = read_registry(_current_main_repo())
     if registry:
         entry = registry.find_by_path(current_path)
         if entry:
@@ -854,7 +868,7 @@ def close_worktree(message: str, keep_volumes: bool = False) -> int:
         return 1
 
     # Get registry entry
-    registry = read_registry()
+    registry = read_registry(_current_main_repo())
     entry = registry.find_by_path(current_path) if registry else None
 
     if not entry:
@@ -1002,7 +1016,7 @@ def close_all_cmd(prune: bool = False, force: bool = False, assume_yes: bool = F
         console.print(f'[dim]cd to {main_repo} and try again.[/dim]')
         return 1
 
-    registry = read_registry()
+    registry = read_registry(_current_main_repo())
     worktrees = list(registry.worktrees) if registry else []
     if not worktrees:
         console.print('[green]No registered worktrees. Nothing to do.[/green]')
@@ -1149,7 +1163,7 @@ def cleanup_orphans(dry_run: bool = False) -> int:
     console.print(Panel.fit('[bold]Orphan Cleanup[/bold]', border_style='yellow'))
     console.print()
 
-    registry = read_registry()
+    registry = read_registry(_current_main_repo())
     if not registry:
         console.print('[yellow]No registry found. Nothing to clean up.[/yellow]')
         return 0
@@ -1285,7 +1299,7 @@ def update_last_accessed() -> int:
 
     current_path = str(repo_root)
 
-    registry = read_registry()
+    registry = read_registry(_current_main_repo())
     if not registry:
         return 0
 
@@ -1508,7 +1522,7 @@ def load_db_cmd(
     console.print()
 
     # Get registry
-    registry = read_registry()
+    registry = read_registry(_current_main_repo())
     if not registry:
         console.print('[red]Error: No worktree registry found[/red]')
         return 1
@@ -1657,7 +1671,7 @@ def prune_missing_worktrees() -> int:
     console.print()
 
     # Get registry
-    registry = read_registry()
+    registry = read_registry(_current_main_repo())
     if not registry:
         console.print('[red]Error: No worktree registry found[/red]')
         return 1

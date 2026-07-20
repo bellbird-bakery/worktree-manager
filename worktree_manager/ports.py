@@ -138,7 +138,9 @@ def check_registry_conflicts(
     if not registry:
         return conflicts
 
-    for wt in registry.worktrees:
+    # Spans every project: allocated ports must be unique machine-wide, not just
+    # within the current repo.
+    for wt in registry.all_worktrees():
         if exclude_path and wt.path == exclude_path:
             continue
 

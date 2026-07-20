@@ -215,7 +215,7 @@ def orchestrator_env(monkeypatch, clean_merged_pushed):
 def _install_registry(monkeypatch, registry):
     import contextlib
 
-    monkeypatch.setattr(commands, 'read_registry', lambda: registry)
+    monkeypatch.setattr(commands, 'read_registry', lambda *_a, **_kw: registry)
 
     @contextlib.contextmanager
     def fake_locked(_main):

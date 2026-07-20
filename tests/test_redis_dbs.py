@@ -214,7 +214,7 @@ def test_validator_shared_redis_checks_shared_port_not_redis_port(tmp_path, monk
     monkeypatch.setattr(validator, 'is_docker_running', lambda: True)
     monkeypatch.setattr(validator, 'check_port_conflicts', lambda *a, **k: [])
     monkeypatch.setattr(validator, 'check_registry_conflicts', lambda *a, **k: [])
-    monkeypatch.setattr(validator, 'read_registry', lambda: None)
+    monkeypatch.setattr(validator, 'read_registry', lambda *_a, **_kw: None)
 
     report = validator.validate_worktree(str(tmp_path), strict_ports=True)
     names = {r.name for r in report.results}

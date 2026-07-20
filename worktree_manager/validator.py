@@ -10,6 +10,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from .docker_ops import is_docker_running
+from .git_ops import get_main_repo_root
 from .ports import check_port_conflicts, check_registry_conflicts
 from .registry import read_registry
 
@@ -322,7 +323,7 @@ def validate_worktree(worktree_path: str, strict_ports: bool = True) -> Validati
         )
 
     # Check 9: Registry consistency
-    registry = read_registry()
+    registry = read_registry(str(get_main_repo_root()))
     if registry:
         entry = registry.find_by_path(worktree_path)
         if entry:

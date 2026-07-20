@@ -62,25 +62,25 @@ def test_build_claude_argv_continue_and_extra_args():
 
 def test_claude_cmd_unknown_feature_returns_error(tmp_path, monkeypatch):
     registry = make_registry(tmp_path)
-    monkeypatch.setattr(commands, 'read_registry', lambda: registry)
+    monkeypatch.setattr(commands, 'read_registry', lambda *_a, **_kw: registry)
     assert commands.claude_cmd(feature_name='nope') == 1
 
 
 def test_claude_cmd_no_registry_returns_error(monkeypatch):
-    monkeypatch.setattr(commands, 'read_registry', lambda: None)
+    monkeypatch.setattr(commands, 'read_registry', lambda *_a, **_kw: None)
     assert commands.claude_cmd(feature_name='auth-fix') == 1
 
 
 def test_claude_cmd_missing_claude_binary_returns_error(tmp_path, monkeypatch):
     registry = make_registry(tmp_path)
-    monkeypatch.setattr(commands, 'read_registry', lambda: registry)
+    monkeypatch.setattr(commands, 'read_registry', lambda *_a, **_kw: registry)
     monkeypatch.setattr(commands.shutil, 'which', lambda name: None)
     assert commands.claude_cmd(feature_name='auth-fix') == 1
 
 
 def test_claude_cmd_execs_claude_in_worktree(tmp_path, monkeypatch):
     registry = make_registry(tmp_path)
-    monkeypatch.setattr(commands, 'read_registry', lambda: registry)
+    monkeypatch.setattr(commands, 'read_registry', lambda *_a, **_kw: registry)
     monkeypatch.setattr(commands.shutil, 'which', lambda name: '/usr/bin/claude')
 
     calls: dict = {}
@@ -97,7 +97,7 @@ def test_claude_cmd_execs_claude_in_worktree(tmp_path, monkeypatch):
 def test_claude_cmd_missing_worktree_directory_returns_error(tmp_path, monkeypatch):
     registry = make_registry(tmp_path)
     registry.worktrees[0].path = str(tmp_path / 'gone')
-    monkeypatch.setattr(commands, 'read_registry', lambda: registry)
+    monkeypatch.setattr(commands, 'read_registry', lambda *_a, **_kw: registry)
     monkeypatch.setattr(commands.shutil, 'which', lambda name: '/usr/bin/claude')
     assert commands.claude_cmd(feature_name='auth-fix') == 1
 

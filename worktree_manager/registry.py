@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import subprocess
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -33,6 +34,34 @@ if TYPE_CHECKING:
 from . import CONFIG_DIR, REGISTRY_FILE
 
 logger = logging.getLogger('worktree_manager')
+
+# Registry file schema. v1 was a single flat worktree list shared by every
+# project; v2 groups entries by their owning main repo.
+SCHEMA_VERSION = 2
+
+
+def _resolve_owning_repo(worktree_path: str) -> str | None:
+    """Return the main repo that owns *worktree_path*, or None if git can't say.
+
+    ``--git-common-dir`` resolves to the shared ``.git`` of the originating
+    checkout, so its parent is the main repo. Used only when migrating a v1
+    registry, whose entries carry no owner of their own.
+    """
+    try:
+        result = subprocess.run(
+            ['git', '-C', worktree_path, 'rev-parse', '--git-common-dir'],
+            capture_output=True,
+            text=True,
+        )
+    except (OSError, ValueError):
+        return None
+    if result.returncode != 0:
+        return None
+
+    common_dir = Path(result.stdout.strip())
+    if not common_dir.is_absolute():
+        common_dir = Path(worktree_path) / common_dir
+    return str(common_dir.resolve().parent)
 
 
 @dataclass
@@ -88,26 +117,85 @@ class WorktreeEntry:
         )
 
 
-@dataclass
 class Registry:
-    """The worktree registry."""
+    """The worktree registry, shared by every project on the machine.
 
-    main_repo_path: str
-    worktrees: list[WorktreeEntry] = field(default_factory=list)
+    Entries are grouped by the main repo that owns them, so operating in one
+    project never sees or mutates another's worktrees. ``main_repo_path`` selects
+    which group ``worktrees`` exposes.
+
+    Index allocation deliberately stays global (see :meth:`get_next_index`):
+    ports are derived from the index, so two projects reusing index 1 would both
+    be assigned port 58001.
+
+    Not a dataclass: ``worktrees`` is a view onto the current project's group
+    rather than a stored field.
+    """
+
+    def __init__(
+        self,
+        main_repo_path: str,
+        projects: dict[str, list[WorktreeEntry]] | None = None,
+        worktrees: list[WorktreeEntry] | None = None,
+    ) -> None:
+        self.main_repo_path = main_repo_path
+        self.projects = projects if projects is not None else {}
+        if worktrees:
+            self.projects[main_repo_path] = list(worktrees)
+
+    def __repr__(self) -> str:
+        return f'Registry(main_repo_path={self.main_repo_path!r}, projects={self.projects!r})'
+
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, Registry):
+            return NotImplemented
+        return self.main_repo_path == other.main_repo_path and self.projects == other.projects
+
+    @property
+    def worktrees(self) -> list[WorktreeEntry]:
+        """The current project's worktrees."""
+        return self.projects.setdefault(self.main_repo_path, [])
+
+    @worktrees.setter
+    def worktrees(self, entries: list[WorktreeEntry]) -> None:
+        self.projects[self.main_repo_path] = list(entries)
+
+    def all_worktrees(self) -> list[WorktreeEntry]:
+        """Every worktree across every project.
+
+        Used for index allocation and port-conflict detection, which must span
+        projects to keep allocated ports unique machine-wide.
+        """
+        return [wt for entries in self.projects.values() for wt in entries]
 
     def to_dict(self) -> dict:
         return {
+            'version': SCHEMA_VERSION,
             'main_repo_path': self.main_repo_path,
-            'worktrees': [wt.to_dict() for wt in self.worktrees],
+            'projects': {repo: [wt.to_dict() for wt in entries] for repo, entries in self.projects.items() if entries},
         }
 
     @classmethod
     def from_dict(cls, data: dict) -> Registry:
-        worktrees = [WorktreeEntry.from_dict(wt) for wt in data.get('worktrees', [])]
-        return cls(
-            main_repo_path=data.get('main_repo_path', ''),
-            worktrees=worktrees,
-        )
+        main_repo_path = data.get('main_repo_path', '')
+
+        if 'projects' in data:
+            projects = {
+                repo: [WorktreeEntry.from_dict(wt) for wt in entries] for repo, entries in data['projects'].items()
+            }
+        else:
+            # v1: a single flat list. main_repo_path recorded only whichever
+            # project ran `wt` last, so it cannot be trusted as the owner of any
+            # given entry — ask git instead, falling back to the recorded value
+            # for worktrees git no longer knows about (already-deleted ones,
+            # which `wt clean` will then correctly report as orphans).
+            projects = {}
+            for raw in data.get('worktrees', []):
+                wt = WorktreeEntry.from_dict(raw)
+                owner = _resolve_owning_repo(wt.path) or main_repo_path
+                projects.setdefault(owner, []).append(wt)
+
+        return cls(main_repo_path=main_repo_path, projects=projects)
 
     def find_by_path(self, path: str) -> WorktreeEntry | None:
         """Find a worktree by its path."""
@@ -132,10 +220,14 @@ class Registry:
         return None
 
     def get_next_index(self) -> int:
-        """Get the next available index."""
-        if not self.worktrees:
+        """Get the next available index, across all projects.
+
+        Index 0 is reserved for a main checkout, which uses the base ports.
+        """
+        all_entries = self.all_worktrees()
+        if not all_entries:
             return 1
-        used_indices = {wt.index for wt in self.worktrees}
+        used_indices = {wt.index for wt in all_entries}
         # Find the first available index starting from 1
         index = 1
         while index in used_indices:
@@ -272,11 +364,18 @@ def locked_registry(main_repo_path: str | None = None, timeout: int = LOCK_TIMEO
                 pass
 
 
-def read_registry() -> Registry | None:
+def read_registry(main_repo_path: str | None = None) -> Registry | None:
     """
     Read the registry without locking.
 
     Use this for read-only operations where you don't need to modify the registry.
+
+    Args:
+        main_repo_path: Scope ``worktrees`` to this project. Pass the current
+            repo for anything project-specific — the file's own main_repo_path
+            is only whichever project ran `wt` last, so relying on it shows one
+            project another's worktrees. Omit only for machine-wide queries,
+            which should use :meth:`Registry.all_worktrees` anyway.
     """
     registry_path = get_registry_path()
     if not registry_path.exists():
@@ -284,4 +383,8 @@ def read_registry() -> Registry | None:
 
     with open(registry_path) as f:
         data = json.load(f)
-        return Registry.from_dict(data)
+        registry = Registry.from_dict(data)
+
+    if main_repo_path:
+        registry.main_repo_path = main_repo_path
+    return registry
