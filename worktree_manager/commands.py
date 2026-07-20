@@ -160,7 +160,10 @@ def create_worktree_cmd(feature_name: str, branch_type: str | None = 'feature') 
         console.print('Creating git worktree...')
         try:
             worktree_path, branch_name = create_worktree(
-                feature_name, repo_path=str(main_repo), branch_type=branch_type
+                feature_name,
+                base_branch=project_config.base_branch,
+                repo_path=str(main_repo),
+                branch_type=branch_type,
             )
             console.print(f'[green]Created: {worktree_path}[/green]')
         except GitError as e:
