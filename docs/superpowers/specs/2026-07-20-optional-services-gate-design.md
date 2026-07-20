@@ -59,6 +59,7 @@ The rule:
 - File has a `services` key → for each service name in the file, deep-merge its
   value against that service's default (so per-key defaults still fill in).
   Default services the file does not name are dropped.
+- No `.worktree-manager.json` at all → infer from disk. See §2.
 
 Every other config key keeps using `_deep_merge` unchanged.
 
@@ -77,12 +78,52 @@ These are deliberately distinct from the existing `has_shared_db()` /
 it exists. A project may have neither, either, or both.
 
 **Consequence to be aware of:** adding `redis` to the defaults means a project
-with no `.worktree-manager.json` now has a Redis service where the schema
+that reaches the full defaults now has a Redis service where the schema
 previously listed none. This matches current runtime behaviour — a Redis port is
-already allocated and written for every worktree — so it is a schema change, not
-a behaviour change.
+already allocated and written for every worktree — so for those projects it is a
+schema change, not a behaviour change.
 
-### 2. Allocation and registry
+A project with a `.worktree-manager.json` that has no `services` key is
+therefore unaffected. A project with *no* config file may now resolve to `web`
+only, which **is** a behaviour change — but only when it has no compose file,
+i.e. only when the DB and Redis ports were never backed by anything. See §2.
+
+### 2. Zero-config detection
+
+A project with no `.worktree-manager.json` should not have to write one just to
+say "I am not a Docker project". When the config file is absent, services are
+inferred from disk instead of taken from the defaults:
+
+- A compose file is present → use the full defaults (`web`, `db`, `redis`).
+  This is today's behaviour for every existing unconfigured project.
+- No compose file → `web` only.
+
+Detection probes a fixed candidate list, in order, taking the first that exists:
+
+```python
+COMPOSE_FILE_CANDIDATES = (
+    'docker-compose.local.yml',
+    'docker-compose.yml',
+    'compose.yml',
+    'compose.yaml',
+)
+```
+
+Probing more than this tool's `docker-compose.local.yml` default matters: a
+project using the standard `docker-compose.yml` with no wt config would
+otherwise be detected as non-Docker and silently lose its DB and Redis ports.
+When a candidate is found its name also becomes the effective `compose_file`.
+
+This runs **only** when `.worktree-manager.json` is absent. Once the file
+exists, `services` is authoritative and no inference happens — so a project can
+always override a wrong guess by writing the config file.
+
+Known limitation: inference reads the working tree, so `wt` behaves differently
+in two checkouts of the same repo if one has its compose file gitignored.
+Writing a `.worktree-manager.json` is the fix, and the `wt status` output names
+which compose file (if any) was detected.
+
+### 3. Allocation and registry
 
 `WorktreePorts.db` and `WorktreePorts.redis` become `int | None`. There is a
 single definition of this dataclass, in `registry.py:44`, imported by
@@ -120,7 +161,7 @@ conflicts = validate_ports(ports.web, db_port_to_check, redis_port_to_check)
 Display code (`wt list`, the create summary) renders `None` as `—` rather than a
 port number.
 
-### 3. `.env` generation
+### 4. `.env` generation
 
 `_configure_env_ports` (`commands.py:274`) takes the new flags. When a service is
 absent it writes no port key for that service, and the summary line omits that
@@ -131,17 +172,31 @@ shared-DB and shared-Redis branches (including `REDIS_BROKER_DB` /
 `REDIS_CACHE_DB` and `_comment_out_stale_redis_urls`) are reached only when the
 service exists, and are otherwise unchanged.
 
-### 4. `wt status`
+### 5. `wt status`
 
 The two hard errors at `validator.py:292-306` become conditional on the project
-needing Docker at all. A project needs Docker when any service other than `web`
-is declared, or when `dev_image`, `shared_db`, or `shared_redis` is set.
+needing Docker at all. **A project needs Docker when a compose file is
+resolvable on disk, or when `dev_image`, `shared_db` or `shared_redis` is set.**
+
+Note this keys off the compose file, *not* the service list. The two answer
+different questions and must not be conflated:
+
+- The **service list** drives port allocation and `.env` keys — what ports this
+  worktree needs reserved.
+- **Compose-file presence** drives the Docker checks — whether Docker is how
+  those services actually run.
+
+A project with a local system Postgres declares a `db` service, so it still gets
+its DB port allocated and conflict-checked, but has no compose file, so
+`wt status` correctly skips the Docker checks rather than failing.
+
+"Resolvable on disk" means `project_config.compose_file` when
+`.worktree-manager.json` is present, or the §2 candidate probe when it is not.
+Either way the check replaces the hardcoded `path / 'docker-compose.local.yml'`
+at `validator.py:305`.
 
 When Docker is not needed, both checks are **skipped entirely** rather than
 recorded as passing, so the output does not imply a check ran that did not.
-
-The compose-file check also starts reading `project_config.compose_file` instead
-of the hardcoded `path / 'docker-compose.local.yml'` at `validator.py:305`.
 
 **Out of scope:** `docker_ops.py` hardcodes `-f docker-compose.local.yml` at
 lines 110, 165 and 218, ignoring `project_config.compose_file`. That is a real
@@ -159,6 +214,16 @@ The config merge carries the most risk and gets direct unit tests:
 - `services` with a partial entry (e.g. `{"db": {"name": "mydb"}}`) → unspecified
   keys fall back to their defaults.
 
+Zero-config detection (§2), all with no `.worktree-manager.json` present:
+
+- `docker-compose.yml` on disk → full defaults, and `compose_file` resolves to
+  `docker-compose.yml`.
+- `docker-compose.local.yml` on disk → full defaults, and it wins over
+  `docker-compose.yml` when both exist.
+- No compose file → `web` only, `has_db()` and `has_redis()` false.
+- A `.worktree-manager.json` declaring only `web` **alongside** a compose file →
+  `web` only. The config file suppresses inference entirely.
+
 Registry round-tripping:
 
 - An entry with `redis: 0` loads as `0`, not `None` (legacy compatibility).
@@ -173,12 +238,19 @@ Behaviour:
   still writes `REDIS_BROKER_DB` when `shared_redis` is configured.
 - `wt status` on a project declaring only `web` produces no Docker errors and
   exits 0.
+- `wt status` on a project declaring `db` but with no compose file skips the
+  Docker checks (the local-Postgres case), while still allocating a DB port.
+- `wt status` on a project with `shared_db` set but no compose file still runs
+  the Docker checks.
 
 ## Not doing
 
 - A `--no-db` / `--skip-port-check` CLI flag. The gate is a property of the
   project, not of a single invocation.
-- Inferring services from `.env.example` contents, which would be implicit and
-  would break when no template exists.
+- Inferring services from `.env.example` contents. §2 does infer from disk, but
+  only from compose-file presence, which is a direct statement about how
+  services run; env-var names are a weak proxy, and no template file exists on
+  many projects. Inference is also confined to the no-config case — writing
+  `.worktree-manager.json` always wins.
 - Removing the `hooks.post_create` / `hooks.pre_close` project keys, which are
   vestigial and never read. Unrelated cleanup.
