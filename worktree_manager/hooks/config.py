@@ -38,6 +38,8 @@ DEFAULT_CONFIG: dict[str, Any] = {
         'npm_install': {
             'enabled': True,
             'extra_args': [],
+            'run_build': True,
+            'build_script': 'build',
         },
         'shared_image': {
             'enabled': True,

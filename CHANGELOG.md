@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 
 ### Added
+- **`npm_install` hook now builds assets** - After `npm ci`, the create hook runs the
+  project's npm `build` script so a fresh worktree has its generated bundle (esbuild
+  output etc.), which is gitignored and therefore absent from a new checkout
+  - Skipped silently when `package.json` defines no such script
+  - New `npm_install` settings: `run_build` (default `true`) and `build_script`
+    (default `"build"`)
+  - A failed build no longer masks the successful install: the result reports
+    `npm_installed` with the build error in its message
 - **Shared-Redis support (`shared_redis` project block)** - Isolate worktrees on one
   shared Redis server by logical DB number instead of a per-worktree `REDIS_PORT`
   - New `redis_dbs_for_index(index)` helper: worktree `index` owns DBs `{2*index,
